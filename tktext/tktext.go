@@ -1,6 +1,6 @@
-// Package text implements a text-editing buffer with an interface like that of
-// the tcl/tk Text widget. The buffer is thread-safe.
-package text
+// Package tktext implements a text-editing buffer with an interface like that
+// of the Tcl/Tk Text widget. The buffer is thread-safe.
+package tktext
 
 import (
 	"bytes"

@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/jangler/zygote/tabs"
-	"github.com/jangler/zygote/text"
+	"github.com/jangler/zygote/tktext"
 
 	"github.com/nsf/termbox-go"
 )
@@ -21,7 +21,7 @@ var (
 	filename string
 
 	statusMsg  string
-	mainBuffer *text.Buffer
+	mainBuffer *tktext.Buffer
 	mainScroll int
 )
 
@@ -120,7 +120,7 @@ func typeRune(ch rune) {
 	mainBuffer.Insert(cursorMark, string(ch))
 }
 
-func moveMark(m string, d int, b *text.Buffer) {
+func moveMark(m string, d int, b *tktext.Buffer) {
 	b.MarkSet(m, fmt.Sprintf("%s %d", m, d))
 }
 
@@ -179,7 +179,7 @@ func main() {
 	}
 	defer termbox.Close()
 
-	mainBuffer = text.NewBuffer()
+	mainBuffer = tktext.NewBuffer()
 	mainBuffer.MarkSet(cursorMark, "1.0")
 	if filename != "" {
 		openFile()
