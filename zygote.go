@@ -21,7 +21,7 @@ var (
 	filename string
 
 	statusMsg  string
-	mainText   *tktext.Text
+	mainText   *tktext.TkText
 	mainScroll int
 )
 
@@ -35,11 +35,11 @@ func drawTextArea(x, y, w, h, scroll int, s string, focused bool) {
 	fg, bg := termbox.ColorDefault, termbox.ColorDefault
 	lines := strings.Split(s, "\n")
 	cursor := mainText.Index(cursorMark)
-	cursor.Row -= 1
+	cursor.Line -= 1
 
 	for i, line := range lines {
-		if i == cursor.Row && focused {
-			cursor.Col = tabs.Columns(line[:cursor.Col], tabStop)
+		if i == cursor.Line && focused {
+			cursor.Char = tabs.Columns(line[:cursor.Char], tabStop)
 		}
 
 		if line == "" {
@@ -55,9 +55,9 @@ func drawTextArea(x, y, w, h, scroll int, s string, focused bool) {
 			}
 			if scroll == 0 {
 				drawString(x, y, line[:max], fg, bg)
-				if i == cursor.Row && focused {
-					if cursor.Col >= 0 && cursor.Col <= max {
-						termbox.SetCursor(cursor.Col, y)
+				if i == cursor.Line && focused {
+					if cursor.Char >= 0 && cursor.Char <= max {
+						termbox.SetCursor(cursor.Char, y)
 					}
 				}
 				y++
@@ -66,8 +66,8 @@ func drawTextArea(x, y, w, h, scroll int, s string, focused bool) {
 				scroll--
 			}
 			line = line[max:]
-			if i == cursor.Row && focused {
-				cursor.Col -= max
+			if i == cursor.Line && focused {
+				cursor.Char -= max
 			}
 		}
 	}
@@ -83,14 +83,12 @@ func draw() {
 	if statusMsg == "" {
 		// Draw cursor row,col numbers
 		cursor := mainText.Index(cursorMark)
-		index := fmt.Sprintf("%d.0", cursor.Row)
-		trueCol := tabs.Columns(mainText.Get(index, cursorMark).String(),
-			tabStop)
-		if cursor.Col == trueCol {
-			statusMsg = fmt.Sprintf("%d,%d", cursor.Row, cursor.Col)
+		index := fmt.Sprintf("%d.0", cursor.Line)
+		col := tabs.Columns(mainText.Get(index, cursorMark).String(), tabStop)
+		if cursor.Char == col {
+			statusMsg = fmt.Sprintf("%d,%d", cursor.Line, cursor.Char)
 		} else {
-			statusMsg = fmt.Sprintf("%d,%d-%d", cursor.Row, cursor.Col,
-				trueCol)
+			statusMsg = fmt.Sprintf("%d,%d-%d", cursor.Line, cursor.Char, col)
 		}
 		x := width - 17
 		drawTextArea(x, height-1, width-x, 1, 0, statusMsg, false)
@@ -120,8 +118,12 @@ func typeRune(ch rune) {
 	mainText.Insert(cursorMark, string(ch))
 }
 
-func moveMark(m string, d int, t *tktext.Text) {
-	t.MarkSet(m, fmt.Sprintf("%s %d", m, d))
+func moveMark(m string, d int, t *tktext.TkText) {
+	if d >= 0 {
+		t.MarkSet(m, fmt.Sprintf("%s+%dc", m, d))
+	} else {
+		t.MarkSet(m, fmt.Sprintf("%s%dc", m, d))
+	}
 }
 
 func scrollLines(d int) {
@@ -203,9 +205,9 @@ func main() {
 			case termbox.KeyArrowUp:
 				scrollLines(-1)
 			case termbox.KeyBackspace2: // KeyBackspace == KeyCtrlH
-				mainText.Delete(fmt.Sprintf("%s -1", cursorMark), cursorMark)
+				mainText.Delete(fmt.Sprintf("%s-1c", cursorMark), cursorMark)
 			case termbox.KeyDelete:
-				mainText.Delete(cursorMark, fmt.Sprintf("%s +1", cursorMark))
+				mainText.Delete(cursorMark, fmt.Sprintf("%s+1c", cursorMark))
 			case termbox.KeyEnter:
 				typeRune('\n')
 			case termbox.KeySpace:
