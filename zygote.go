@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strings"
 	"syscall"
 	"time"
 
@@ -41,6 +42,28 @@ func drawString(x, y int, s string, fg, bg termbox.Attribute) {
 	}
 }
 
+func drawStringDefault(x, y int, s string) {
+	drawString(x, y, s, termbox.ColorDefault, termbox.ColorDefault)
+}
+
+func indexPos(t *tktext.TkText, index string, ts int) string {
+	cursor := t.Index(index)
+	tabCount := strings.Count(t.Get(index+" linestart", index), "\t")
+	col := cursor.Char + tabCount*(ts-1)
+	if cursor.Char == col {
+		return fmt.Sprintf("%d,%d", cursor.Line, cursor.Char)
+	}
+	return fmt.Sprintf("%d,%d-%d", cursor.Line, cursor.Char, col)
+}
+
+func scrollPercent(view1, view2 float64) string {
+	frac := view1 / (1.0 - (view2 - view1))
+	if view2 == 1 && view1 == 0 {
+		frac = 1
+	}
+	return fmt.Sprintf("%d%%", int(frac*100))
+}
+
 func draw() {
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 	width, height := termbox.Size()
@@ -48,7 +71,7 @@ func draw() {
 	mainText.SetSize(width, height-1)
 	mainText.See(cursorMark)
 	for i, line := range mainText.GetScreenLines() {
-		drawString(0, i, line, termbox.ColorDefault, termbox.ColorDefault)
+		drawStringDefault(0, i, line)
 	}
 	termbox.SetCursor(mainText.BBox(cursorMark))
 
@@ -61,38 +84,19 @@ func draw() {
 			s = "Save as: "
 		}
 
-		drawString(0, height-1, s, termbox.ColorDefault, termbox.ColorDefault)
+		drawStringDefault(0, height-1, s)
 		x := len(s)
 		s = promptText.Get("1.0", "end")
-		drawString(x, height-1, s, termbox.ColorDefault, termbox.ColorDefault)
+		drawStringDefault(x, height-1, s)
 		pos := promptText.Index(cursorMark)
 		termbox.SetCursor(x+pos.Char, height-1)
 	} else if statusMsg == "" {
-		// Draw cursor row,col numbers
-		cursor := mainText.Index(cursorMark)
-		col, _ := mainText.BBox(cursorMark)
-		if cursor.Char == col {
-			statusMsg = fmt.Sprintf("%d,%d", cursor.Line, cursor.Char)
-		} else {
-			statusMsg = fmt.Sprintf("%d,%d-%d", cursor.Line, cursor.Char, col)
-		}
-		x := width - 17
-		drawString(x, height-1, statusMsg, termbox.ColorDefault,
-			termbox.ColorDefault)
-
-		// Draw scroll percentage
-		x = width - 4
-		view1, view2 := mainText.YView()
-		scrollFraction := view1 / (1.0 - (view2 - view1))
-		if view2 == 1 && view1 == 0 {
-			scrollFraction = 1
-		}
-		statusMsg = fmt.Sprintf("%d%%", int(scrollFraction*100))
-		drawString(x, height-1, statusMsg, termbox.ColorDefault,
-			termbox.ColorDefault)
+		// Draw cursor row,col numbers and scroll percentage
+		pos := indexPos(mainText, cursorMark, tabStop)
+		drawStringDefault(width-17, height-1, pos)
+		drawStringDefault(width-4, height-1, scrollPercent(mainText.YView()))
 	} else {
-		drawString(0, height-1, statusMsg, termbox.ColorDefault,
-			termbox.ColorDefault)
+		drawStringDefault(0, height-1, statusMsg)
 	}
 
 	err := termbox.Flush()
