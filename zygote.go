@@ -36,8 +36,9 @@ var (
 	// Text buffers
 	mainText   = tktext.New()
 	promptText = tktext.New()
-	manualText = tktext.New()
 	focusText  = mainText
+
+	manualText *tktext.TkText // Not initialized unless we need it
 
 	// Event channels
 	eventChan = make(chan termbox.Event)
@@ -265,6 +266,7 @@ func suspend() {
 
 		// Hopefully by now we've got SIGCONT and can re-init things
 		termbox.Init()
+		termbox.SetInputMode(termbox.InputAlt)
 		draw()
 		getEvent()
 	} else {
@@ -321,6 +323,12 @@ func redo() {
 func toggleManual() {
 	if focusText != promptText {
 		modeManual = !modeManual
+		if manualText == nil {
+			manualText = tktext.New()
+			manualText.Insert("end", manualString)
+			manualText.EditReset()
+			manualText.MarkSet(cursorMark, "1.0")
+		}
 		unprompt()
 	}
 }
@@ -394,13 +402,18 @@ func handleEvent(event termbox.Event) {
 			redo()
 		case termbox.KeyCtrlU:
 			undo()
-		case termbox.KeyCtrlV:
-			toggleManual()
 		case termbox.KeyCtrlZ:
 			stop = true
 			suspend()
 		default:
-			if event.Ch != 0 {
+			if event.Mod == termbox.ModAlt {
+				switch event.Ch {
+				case 'm':
+					toggleManual()
+				default:
+					msgError("Unbound key: M-" + string(event.Ch))
+				}
+			} else if event.Ch != 0 {
 				stop = typeRune(event.Ch)
 			} else {
 				msgError(fmt.Sprintf("Unbound key: 0x%04X", event.Key))
@@ -448,14 +461,12 @@ func main() {
 		os.Exit(1)
 	}
 	defer termbox.Close()
+	termbox.SetInputMode(termbox.InputAlt)
 
 	mainText.SetWrap(tktext.Char)
 	mainText.SetTabStop(tabStop)
 	mainText.MarkSet(cursorMark, "end")
 	promptText.MarkSet(cursorMark, "end")
-	manualText.Insert("end", manualString)
-	manualText.EditReset()
-	manualText.MarkSet(cursorMark, "1.0")
 	if filename != "" {
 		openFile(filename)
 	}
