@@ -6,6 +6,8 @@ import (
 	"io/ioutil"
 	"os"
 	"strings"
+	"syscall"
+	"time"
 
 	"github.com/jangler/tktext"
 	"github.com/nsf/termbox-go"
@@ -20,6 +22,9 @@ var (
 
 	statusMsg string
 	mainText  *tktext.TkText
+
+	eventChan = make(chan termbox.Event)
+	quitChan  = make(chan bool)
 )
 
 func drawString(x, y int, s string, fg, bg termbox.Attribute) {
@@ -135,6 +140,24 @@ func saveFile() {
 	}
 }
 
+func suspend() {
+	if proc, err := os.FindProcess(os.Getpid()); err == nil {
+		// Clean up and send SIGSTOP to this process
+		termbox.Close()
+		proc.Signal(syscall.SIGSTOP)
+
+		// Hope that 100ms is enough for the process to receive the signal
+		time.Sleep(time.Second / 10)
+
+		// Hopefully by now we've got SIGCONT and can re-init things
+		termbox.Init()
+		draw()
+		getEvent()
+	} else {
+		statusMsg = err.Error()
+	}
+}
+
 func initFlags() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [<option>...] [<file>]", os.Args[0])
@@ -153,11 +176,89 @@ func initFlags() {
 	}
 }
 
+func handleEvent(event termbox.Event) {
+	stop := false
+
+	switch event.Type {
+	case termbox.EventError:
+		statusMsg = event.Err.Error()
+		draw()
+	case termbox.EventKey:
+		switch event.Key {
+		case termbox.KeyArrowDown, termbox.KeyCtrlJ:
+			changeLine(1)
+		case termbox.KeyArrowLeft, termbox.KeyCtrlH:
+			mainText.MarkSet(cursorMark, fmt.Sprintf("%s-1c", cursorMark))
+		case termbox.KeyArrowRight, termbox.KeyCtrlL:
+			mainText.MarkSet(cursorMark, fmt.Sprintf("%s+1c", cursorMark))
+		case termbox.KeyArrowUp, termbox.KeyCtrlK:
+			changeLine(-1)
+		case termbox.KeyBackspace2: // KeyBackspace == KeyCtrlH
+			mainText.Delete(fmt.Sprintf("%s-1c", cursorMark), cursorMark)
+		case termbox.KeyDelete:
+			mainText.Delete(cursorMark, fmt.Sprintf("%s+1c", cursorMark))
+		case termbox.KeyEnd, termbox.KeyCtrlE:
+			mainText.MarkSet(cursorMark, cursorMark+" lineend")
+		case termbox.KeyEnter:
+			typeRune('\n')
+		case termbox.KeyHome, termbox.KeyCtrlA:
+			mainText.MarkSet(cursorMark, cursorMark+" linestart")
+		case termbox.KeyPgdn, termbox.KeyCtrlD:
+			_, height := termbox.Size()
+			changeLine(height - 1)
+		case termbox.KeyPgup, termbox.KeyCtrlU:
+			_, height := termbox.Size()
+			changeLine(-height + 1)
+		case termbox.KeySpace:
+			typeRune(' ')
+		case termbox.KeyTab:
+			typeRune('\t')
+		case termbox.KeyCtrlS:
+			saveFile()
+		case termbox.KeyCtrlQ:
+			stop = true
+			quitChan <- true
+		case termbox.KeyCtrlZ:
+			stop = true
+			suspend()
+		default:
+			if event.Ch != 0 {
+				typeRune(event.Ch)
+			} else {
+				statusMsg = fmt.Sprintf("Unbound key: 0x%04X", event.Key)
+			}
+		}
+		if !stop {
+			draw()
+		}
+	case termbox.EventResize:
+		draw()
+	}
+
+	if !stop {
+		getEvent()
+	}
+}
+
+func getEvent() {
+	eventChan <- termbox.PollEvent()
+}
+
+func handleEvents() {
+	for {
+		select {
+		case event := <-eventChan:
+			go handleEvent(event)
+		case <-quitChan:
+			return
+		}
+	}
+}
+
 func main() {
 	initFlags()
 
-	err := termbox.Init()
-	if err != nil {
+	if err := termbox.Init(); err != nil {
 		fmt.Fprintln(os.Stderr, err.Error())
 		os.Exit(1)
 	}
@@ -172,56 +273,6 @@ func main() {
 	}
 	draw()
 
-	loop := true
-	for loop {
-		switch event := termbox.PollEvent(); event.Type {
-		case termbox.EventError:
-			statusMsg = event.Err.Error()
-			draw()
-		case termbox.EventKey:
-			switch event.Key {
-			case termbox.KeyArrowDown, termbox.KeyCtrlJ:
-				changeLine(1)
-			case termbox.KeyArrowLeft, termbox.KeyCtrlH:
-				mainText.MarkSet(cursorMark, fmt.Sprintf("%s-1c", cursorMark))
-			case termbox.KeyArrowRight, termbox.KeyCtrlL:
-				mainText.MarkSet(cursorMark, fmt.Sprintf("%s+1c", cursorMark))
-			case termbox.KeyArrowUp, termbox.KeyCtrlK:
-				changeLine(-1)
-			case termbox.KeyBackspace2: // KeyBackspace == KeyCtrlH
-				mainText.Delete(fmt.Sprintf("%s-1c", cursorMark), cursorMark)
-			case termbox.KeyDelete:
-				mainText.Delete(cursorMark, fmt.Sprintf("%s+1c", cursorMark))
-			case termbox.KeyEnd, termbox.KeyCtrlE:
-				mainText.MarkSet(cursorMark, cursorMark+" lineend")
-			case termbox.KeyEnter:
-				typeRune('\n')
-			case termbox.KeyHome, termbox.KeyCtrlA:
-				mainText.MarkSet(cursorMark, cursorMark+" linestart")
-			case termbox.KeyPgdn, termbox.KeyCtrlD:
-				_, height := termbox.Size()
-				changeLine(height - 1)
-			case termbox.KeyPgup, termbox.KeyCtrlU:
-				_, height := termbox.Size()
-				changeLine(-height + 1)
-			case termbox.KeySpace:
-				typeRune(' ')
-			case termbox.KeyTab:
-				typeRune('\t')
-			case termbox.KeyCtrlS:
-				saveFile()
-			case termbox.KeyCtrlQ:
-				loop = false
-			default:
-				if event.Ch != 0 {
-					typeRune(event.Ch)
-				} else {
-					statusMsg = fmt.Sprintf("Unbound key: 0x%04X", event.Key)
-				}
-			}
-			draw()
-		case termbox.EventResize:
-			draw()
-		}
-	}
+	go getEvent()
+	handleEvents()
 }
