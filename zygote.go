@@ -73,13 +73,12 @@ func draw() {
 	for i, line := range mainText.GetScreenLines() {
 		drawString(0, i, line, termbox.ColorDefault, termbox.ColorDefault)
 	}
-	bbox := mainText.BBox(cursorMark)
-	termbox.SetCursor(bbox[0], bbox[1])
+	termbox.SetCursor(mainText.BBox(cursorMark))
 
 	if statusMsg == "" {
 		// Draw cursor row,col numbers
 		cursor := mainText.Index(cursorMark)
-		col := mainText.BBox(cursorMark)[0]
+		col, _ := mainText.BBox(cursorMark)
 		if cursor.Char == col {
 			statusMsg = fmt.Sprintf("%d,%d", cursor.Line, cursor.Char)
 		} else {
@@ -111,9 +110,9 @@ func typeRune(ch rune) {
 }
 
 func changeLine(d int) {
-	bbox := mainText.BBox(cursorMark)
-	bbox[1] += d
-	mainText.MarkSet(cursorMark, fmt.Sprintf("@%d,%d", bbox[0], bbox[1]))
+	x, y := mainText.BBox(cursorMark)
+	y += d
+	mainText.MarkSet(cursorMark, fmt.Sprintf("@%d,%d", x, y))
 }
 
 func openFile() {
@@ -181,20 +180,30 @@ func main() {
 			draw()
 		case termbox.EventKey:
 			switch event.Key {
-			case termbox.KeyArrowDown:
+			case termbox.KeyArrowDown, termbox.KeyCtrlJ:
 				changeLine(1)
-			case termbox.KeyArrowLeft:
+			case termbox.KeyArrowLeft, termbox.KeyCtrlH:
 				mainText.MarkSet(cursorMark, fmt.Sprintf("%s-1c", cursorMark))
-			case termbox.KeyArrowRight:
+			case termbox.KeyArrowRight, termbox.KeyCtrlL:
 				mainText.MarkSet(cursorMark, fmt.Sprintf("%s+1c", cursorMark))
-			case termbox.KeyArrowUp:
+			case termbox.KeyArrowUp, termbox.KeyCtrlK:
 				changeLine(-1)
 			case termbox.KeyBackspace2: // KeyBackspace == KeyCtrlH
 				mainText.Delete(fmt.Sprintf("%s-1c", cursorMark), cursorMark)
 			case termbox.KeyDelete:
 				mainText.Delete(cursorMark, fmt.Sprintf("%s+1c", cursorMark))
+			case termbox.KeyEnd, termbox.KeyCtrlE:
+				mainText.MarkSet(cursorMark, cursorMark+" lineend")
 			case termbox.KeyEnter:
 				typeRune('\n')
+			case termbox.KeyHome, termbox.KeyCtrlA:
+				mainText.MarkSet(cursorMark, cursorMark+" linestart")
+			case termbox.KeyPgdn, termbox.KeyCtrlD:
+				_, height := termbox.Size()
+				changeLine(height - 1)
+			case termbox.KeyPgup, termbox.KeyCtrlU:
+				_, height := termbox.Size()
+				changeLine(-height + 1)
 			case termbox.KeySpace:
 				typeRune(' ')
 			case termbox.KeyTab:
