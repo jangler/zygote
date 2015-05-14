@@ -40,6 +40,11 @@ var (
 
 	manualText *tktext.TkText // Not initialized unless we need it
 
+	cursorCol = map[*tktext.TkText]int{
+		mainText:   0,
+		manualText: 0,
+	}
+
 	// Event channels
 	eventChan = make(chan termbox.Event)
 	quitChan  = make(chan bool)
@@ -216,6 +221,11 @@ func typeRune(ch rune) bool {
 func changeLine(d int) {
 	if focusText != promptText {
 		x, y := focusText.BBox(cursorMark)
+		if x > cursorCol[focusText] {
+			cursorCol[focusText] = x
+		} else {
+			x = cursorCol[focusText]
+		}
 		y += d
 		focusText.MarkSet(cursorMark, fmt.Sprintf("@%d,%d", x, y))
 	}
@@ -362,12 +372,13 @@ func handleEvent(event termbox.Event) {
 		msgError(event.Err.Error())
 		draw()
 	case termbox.EventKey:
-		sep := false // Whether an undo separator should be inserted
+		sep := false     // Whether an undo separator should be inserted
+		resetCol := true // Whether cursorCol should be reset
 
 		switch event.Key {
 		case termbox.KeyArrowDown, termbox.KeyCtrlJ:
 			changeLine(1)
-			sep = true
+			sep, resetCol = true, false
 		case termbox.KeyArrowLeft, termbox.KeyCtrlH:
 			focusText.MarkSet(cursorMark, cursorMark+"-1c")
 			sep = true
@@ -376,7 +387,7 @@ func handleEvent(event termbox.Event) {
 			sep = true
 		case termbox.KeyArrowUp, termbox.KeyCtrlK:
 			changeLine(-1)
-			sep = true
+			sep, resetCol = true, false
 		case termbox.KeyBackspace2: // KeyBackspace == KeyCtrlH
 			focusText.Delete(cursorMark+"-1c", cursorMark)
 		case termbox.KeyDelete:
@@ -392,11 +403,11 @@ func handleEvent(event termbox.Event) {
 		case termbox.KeyPgdn, termbox.KeyCtrlN:
 			_, height := termbox.Size()
 			changeLine(height - 1)
-			sep = true
+			sep, resetCol = true, false
 		case termbox.KeyPgup, termbox.KeyCtrlP:
 			_, height := termbox.Size()
 			changeLine(-height + 1)
-			sep = true
+			sep, resetCol = true, false
 		case termbox.KeySpace:
 			typeRune(' ')
 		case termbox.KeyTab:
@@ -440,6 +451,9 @@ func handleEvent(event termbox.Event) {
 			}
 		}
 
+		if resetCol {
+			cursorCol[focusText] = 0
+		}
 		if sep && focusText == mainText {
 			mainText.EditSeparator()
 		}
