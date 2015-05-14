@@ -26,7 +26,7 @@ func TestIndexPos(t *testing.T) {
 }
 
 func TestScrollPercent(t *testing.T) {
-	if got, want := scrollPercent(0, 1), "100%"; got != want {
+	if got, want := scrollPercent(0, 1), "All"; got != want {
 		t.Errorf("scrollPercent(0, 1) == %#v; want %#v", got, want)
 	}
 	if got, want := scrollPercent(0, 0.5), "0%"; got != want {

@@ -36,11 +36,15 @@ var (
 	// Text buffers
 	mainText   = tktext.New()
 	promptText = tktext.New()
+	manualText = tktext.New()
 	focusText  = mainText
 
 	// Event channels
 	eventChan = make(chan termbox.Event)
 	quitChan  = make(chan bool)
+
+	// Modes
+	modeManual bool
 )
 
 // Draw the given string in the given style, starting at the given screen
@@ -73,7 +77,7 @@ func indexPos(t *tktext.TkText, index string, ts int) string {
 func scrollPercent(view1, view2 float64) string {
 	frac := view1 / (1.0 - (view2 - view1))
 	if view2 == 1 && view1 == 0 {
-		frac = 1
+		return "All"
 	}
 	return fmt.Sprintf("%d%%", int(frac*100))
 }
@@ -95,12 +99,17 @@ func draw() {
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 	width, height := termbox.Size()
 
-	mainText.SetSize(width, height-1)
-	mainText.See(cursorMark)
-	for i, line := range mainText.GetScreenLines() {
+	drawText := mainText
+	if modeManual {
+		drawText = manualText
+		drawText.EditUndo() // No changing the manual!
+	}
+	drawText.SetSize(width, height-1)
+	drawText.See(cursorMark)
+	for i, line := range drawText.GetScreenLines() {
 		drawStringDefault(0, i, line)
 	}
-	termbox.SetCursor(mainText.BBox(cursorMark))
+	termbox.SetCursor(drawText.BBox(cursorMark))
 
 	if focusText == promptText {
 		var s string
@@ -123,9 +132,9 @@ func draw() {
 		termbox.SetCursor(x+pos.Char, height-1)
 	} else if statusMsg == "" {
 		// Draw cursor row,col numbers and scroll percentage
-		pos := indexPos(mainText, cursorMark, tabStop)
+		pos := indexPos(drawText, cursorMark, tabStop)
 		drawStringDefault(width-17, height-1, pos)
-		drawStringDefault(width-4, height-1, scrollPercent(mainText.YView()))
+		drawStringDefault(width-4, height-1, scrollPercent(drawText.YView()))
 	} else {
 		drawString(0, height-1, statusMsg, statusFg, termbox.ColorDefault)
 	}
@@ -138,11 +147,20 @@ func draw() {
 	}
 }
 
+// Reset the focus when leaving a prompt
+func unprompt() {
+	if modeManual {
+		focusText = manualText
+	} else {
+		focusText = mainText
+	}
+}
+
 // Enter the rune into the focused buffer. Entering line feed into a prompt
 // confirms it. Returns true if the event loop should stop
 func typeRune(ch rune) bool {
 	if ch == '\n' && focusText == promptText {
-		focusText = mainText
+		unprompt()
 		switch promptMode {
 		case promptOpen:
 			openFile(promptText.Get("1.0", "end"))
@@ -157,14 +175,14 @@ func typeRune(ch rune) bool {
 			case promptOpenYN:
 				prompt(promptOpen)
 			case promptSaveYN:
-				focusText = mainText
+				unprompt()
 				saveFile(true)
 			case promptQuitYN:
 				quitChan <- true
 				return true
 			}
 		} else if ch == 'n' {
-			focusText = mainText
+			unprompt()
 		}
 	} else {
 		focusText.Insert(cursorMark, string(ch))
@@ -175,13 +193,11 @@ func typeRune(ch rune) bool {
 
 // Change the cursor's display line by the given delta
 func changeLine(d int) {
-	if focusText != mainText {
-		return
+	if focusText != promptText {
+		x, y := focusText.BBox(cursorMark)
+		y += d
+		focusText.MarkSet(cursorMark, fmt.Sprintf("@%d,%d", x, y))
 	}
-
-	x, y := mainText.BBox(cursorMark)
-	y += d
-	mainText.MarkSet(cursorMark, fmt.Sprintf("@%d,%d", x, y))
 }
 
 // Attempt to read the file with the given path into the buffer
@@ -222,6 +238,12 @@ func saveFile(overwrite bool) {
 		}
 
 		p := []byte(mainText.Get("1.0", "end"))
+
+		// Ensure file has final newline
+		if len(p) > 0 && p[len(p)-1] != '\n' {
+			p = append(p, '\n')
+		}
+
 		if err := ioutil.WriteFile(filename, p, 0644); err == nil {
 			mainText.EditSetModified(false)
 			msgNormal(fmt.Sprintf("Saved \"%s\".", filename))
@@ -252,12 +274,10 @@ func suspend() {
 
 // Cancel out of a prompt
 func cancel() {
-	if focusText == mainText {
-		return
+	if focusText == promptText {
+		unprompt()
+		msgNormal("Cancelled.")
 	}
-
-	focusText = mainText
-	msgNormal("Cancelled.")
 }
 
 // Initialize command-line flags and args
@@ -294,6 +314,14 @@ func redo() {
 		if !mainText.EditRedo() {
 			msgError("Nothing to redo.")
 		}
+	}
+}
+
+// Toggle manual mode
+func toggleManual() {
+	if focusText != promptText {
+		modeManual = !modeManual
+		unprompt()
 	}
 }
 
@@ -366,6 +394,8 @@ func handleEvent(event termbox.Event) {
 			redo()
 		case termbox.KeyCtrlU:
 			undo()
+		case termbox.KeyCtrlV:
+			toggleManual()
 		case termbox.KeyCtrlZ:
 			stop = true
 			suspend()
@@ -423,6 +453,9 @@ func main() {
 	mainText.SetTabStop(tabStop)
 	mainText.MarkSet(cursorMark, "end")
 	promptText.MarkSet(cursorMark, "end")
+	manualText.Insert("end", manualString)
+	manualText.EditReset()
+	manualText.MarkSet(cursorMark, "1.0")
 	if filename != "" {
 		openFile(filename)
 	}
