@@ -334,7 +334,7 @@ func initFlags() {
 // Undo change to main buffer
 func undo() {
 	if focusText == mainText {
-		if !mainText.EditUndo() {
+		if !mainText.EditUndo(cursorMark) {
 			msgError("Nothing to undo.")
 		}
 	}
@@ -343,7 +343,7 @@ func undo() {
 // Redo change to main buffer
 func redo() {
 	if focusText == mainText {
-		if !mainText.EditRedo() {
+		if !mainText.EditRedo(cursorMark) {
 			msgError("Nothing to redo.")
 		}
 	}
