@@ -8,8 +8,6 @@ import (
 	"strings"
 
 	"github.com/jangler/tktext"
-	"github.com/jangler/zygote/tabs"
-
 	"github.com/nsf/termbox-go"
 )
 
@@ -20,9 +18,8 @@ var (
 	tabStop  int
 	filename string
 
-	statusMsg  string
-	mainText   *tktext.TkText
-	mainScroll int
+	statusMsg string
+	mainText  *tktext.TkText
 )
 
 func drawString(x, y int, s string, fg, bg termbox.Attribute) {
@@ -38,14 +35,8 @@ func drawTextArea(x, y, w, h, scroll int, s string, focused bool) {
 	cursor.Line -= 1
 
 	for i, line := range lines {
-		if i == cursor.Line && focused {
-			cursor.Char = tabs.Columns(line[:cursor.Char], tabStop)
-		}
-
 		if line == "" {
 			line = " " // Just a hack to make the loop logic simpler
-		} else {
-			line = tabs.Expand(line, tabStop)
 		}
 
 		for line != "" && h > 0 {
@@ -77,14 +68,18 @@ func draw() {
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 	width, height := termbox.Size()
 
-	drawTextArea(0, 0, width, height-1, mainScroll,
-		mainText.Get("1.0", "end").String(), true)
+	mainText.SetSize(width, height-1)
+	mainText.See(cursorMark)
+	for i, line := range mainText.GetScreenLines() {
+		drawString(0, i, line, termbox.ColorDefault, termbox.ColorDefault)
+	}
+	bbox := mainText.BBox(cursorMark)
+	termbox.SetCursor(bbox[0], bbox[1])
 
 	if statusMsg == "" {
 		// Draw cursor row,col numbers
 		cursor := mainText.Index(cursorMark)
-		index := fmt.Sprintf("%d.0", cursor.Line)
-		col := tabs.Columns(mainText.Get(index, cursorMark).String(), tabStop)
+		col := mainText.BBox(cursorMark)[0]
 		if cursor.Char == col {
 			statusMsg = fmt.Sprintf("%d,%d", cursor.Line, cursor.Char)
 		} else {
@@ -95,12 +90,9 @@ func draw() {
 
 		// Draw scroll percentage
 		x = width - 4
-		scrollPercent := 0
-		if mainScroll > 0 && mainText.NumLines() >= height {
-			scrollPercent = mainScroll * 100 /
-				(mainText.NumLines() - (height - 1))
-		}
-		statusMsg = fmt.Sprintf("%d%%", scrollPercent)
+		view1, view2 := mainText.YView()
+		scrollFraction := view1 / (1.0 - (view2 - view1))
+		statusMsg = fmt.Sprintf("%d%%", int(scrollFraction*100))
 		drawTextArea(x, height-1, width-x, 1, 0, statusMsg, false)
 	} else {
 		drawTextArea(0, height-1, width, 1, 0, statusMsg, false)
@@ -118,19 +110,10 @@ func typeRune(ch rune) {
 	mainText.Insert(cursorMark, string(ch))
 }
 
-func moveMark(m string, d int, t *tktext.TkText) {
-	if d >= 0 {
-		t.MarkSet(m, fmt.Sprintf("%s+%dc", m, d))
-	} else {
-		t.MarkSet(m, fmt.Sprintf("%s%dc", m, d))
-	}
-}
-
-func scrollLines(d int) {
-	mainScroll += d
-	if mainScroll < 0 {
-		mainScroll = 0
-	}
+func changeLine(d int) {
+	bbox := mainText.BBox(cursorMark)
+	bbox[1] += d
+	mainText.MarkSet(cursorMark, fmt.Sprintf("@%d,%d", bbox[0], bbox[1]))
 }
 
 func openFile() {
@@ -145,7 +128,7 @@ func openFile() {
 }
 
 func saveFile() {
-	p := mainText.Get("1.0", "end").Bytes()
+	p := []byte(mainText.Get("1.0", "end"))
 	if err := ioutil.WriteFile(filename, p, 0644); err == nil {
 		statusMsg = fmt.Sprintf("Saved \"%s\".", filename)
 	} else {
@@ -182,6 +165,8 @@ func main() {
 	defer termbox.Close()
 
 	mainText = tktext.New()
+	mainText.SetWrap(tktext.Char)
+	mainText.SetTabStop(tabStop)
 	mainText.MarkSet(cursorMark, "1.0")
 	if filename != "" {
 		openFile()
@@ -197,13 +182,13 @@ func main() {
 		case termbox.EventKey:
 			switch event.Key {
 			case termbox.KeyArrowDown:
-				scrollLines(1)
+				changeLine(1)
 			case termbox.KeyArrowLeft:
-				moveMark(cursorMark, -1, mainText)
+				mainText.MarkSet(cursorMark, fmt.Sprintf("%s-1c", cursorMark))
 			case termbox.KeyArrowRight:
-				moveMark(cursorMark, 1, mainText)
+				mainText.MarkSet(cursorMark, fmt.Sprintf("%s+1c", cursorMark))
 			case termbox.KeyArrowUp:
-				scrollLines(-1)
+				changeLine(-1)
 			case termbox.KeyBackspace2: // KeyBackspace == KeyCtrlH
 				mainText.Delete(fmt.Sprintf("%s-1c", cursorMark), cursorMark)
 			case termbox.KeyDelete:
