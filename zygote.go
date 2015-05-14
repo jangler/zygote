@@ -165,6 +165,7 @@ func openFile(path string) {
 		mainText.Delete("1.0", "end")
 		mainText.Insert("1.0", string(p))
 		mainText.MarkSet(cursorMark, "1.0")
+		mainText.EditReset()
 		msgNormal(fmt.Sprintf("Opened \"%s\".", path))
 		filename = path
 	} else {
@@ -245,6 +246,24 @@ func initFlags() {
 	}
 }
 
+// Undo change to main buffer
+func undo() {
+	if focusText == mainText {
+		if !mainText.EditUndo() {
+			msgError("Nothing to undo.")
+		}
+	}
+}
+
+// Redo change to main buffer
+func redo() {
+	if focusText == mainText {
+		if !mainText.EditRedo() {
+			msgError("Nothing to redo.")
+		}
+	}
+}
+
 // Take appropriate action for the given termbox event
 func handleEvent(event termbox.Event) {
 	stop := false
@@ -254,31 +273,41 @@ func handleEvent(event termbox.Event) {
 		msgError(event.Err.Error())
 		draw()
 	case termbox.EventKey:
+		sep := false // Whether an undo separator should be inserted
+
 		switch event.Key {
 		case termbox.KeyArrowDown, termbox.KeyCtrlJ:
 			changeLine(1)
+			sep = true
 		case termbox.KeyArrowLeft, termbox.KeyCtrlH:
 			focusText.MarkSet(cursorMark, cursorMark+"-1c")
+			sep = true
 		case termbox.KeyArrowRight, termbox.KeyCtrlL:
 			focusText.MarkSet(cursorMark, cursorMark+"+1c")
+			sep = true
 		case termbox.KeyArrowUp, termbox.KeyCtrlK:
 			changeLine(-1)
+			sep = true
 		case termbox.KeyBackspace2: // KeyBackspace == KeyCtrlH
 			focusText.Delete(cursorMark+"-1c", cursorMark)
 		case termbox.KeyDelete:
 			focusText.Delete(cursorMark, cursorMark+"+1c")
 		case termbox.KeyEnd, termbox.KeyCtrlE:
 			focusText.MarkSet(cursorMark, cursorMark+" lineend")
+			sep = true
 		case termbox.KeyEnter:
 			typeRune('\n')
 		case termbox.KeyHome, termbox.KeyCtrlA:
 			focusText.MarkSet(cursorMark, cursorMark+" linestart")
-		case termbox.KeyPgdn, termbox.KeyCtrlD:
+			sep = true
+		case termbox.KeyPgdn, termbox.KeyCtrlN:
 			_, height := termbox.Size()
 			changeLine(height - 1)
-		case termbox.KeyPgup, termbox.KeyCtrlU:
+			sep = true
+		case termbox.KeyPgup, termbox.KeyCtrlP:
 			_, height := termbox.Size()
 			changeLine(-height + 1)
+			sep = true
 		case termbox.KeySpace:
 			typeRune(' ')
 		case termbox.KeyTab:
@@ -292,6 +321,10 @@ func handleEvent(event termbox.Event) {
 		case termbox.KeyCtrlQ:
 			stop = true
 			quitChan <- true
+		case termbox.KeyCtrlR:
+			redo()
+		case termbox.KeyCtrlU:
+			undo()
 		case termbox.KeyCtrlZ:
 			stop = true
 			suspend()
@@ -301,6 +334,10 @@ func handleEvent(event termbox.Event) {
 			} else {
 				msgError(fmt.Sprintf("Unbound key: 0x%04X", event.Key))
 			}
+		}
+
+		if sep && focusText == mainText {
+			mainText.EditSeparator()
 		}
 		if !stop {
 			draw()
