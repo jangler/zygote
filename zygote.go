@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"strings"
 	"syscall"
 	"time"
 
@@ -15,13 +14,22 @@ import (
 
 const cursorMark = "c"
 
+const (
+	promptOpen = iota
+	promptSave
+)
+
 var (
 	// Command-line flags/args
 	tabStop  int
 	filename string
 
-	statusMsg string
-	mainText  *tktext.TkText
+	statusMsg  string
+	promptMode int
+
+	mainText   = tktext.New()
+	promptText = tktext.New()
+	focusText  = mainText
 
 	eventChan = make(chan termbox.Event)
 	quitChan  = make(chan bool)
@@ -30,42 +38,6 @@ var (
 func drawString(x, y int, s string, fg, bg termbox.Attribute) {
 	for i, ch := range s {
 		termbox.SetCell(x+i, y, ch, fg, bg)
-	}
-}
-
-func drawTextArea(x, y, w, h, scroll int, s string, focused bool) {
-	fg, bg := termbox.ColorDefault, termbox.ColorDefault
-	lines := strings.Split(s, "\n")
-	cursor := mainText.Index(cursorMark)
-	cursor.Line -= 1
-
-	for i, line := range lines {
-		if line == "" {
-			line = " " // Just a hack to make the loop logic simpler
-		}
-
-		for line != "" && h > 0 {
-			max := len(line)
-			if max > w {
-				max = w
-			}
-			if scroll == 0 {
-				drawString(x, y, line[:max], fg, bg)
-				if i == cursor.Line && focused {
-					if cursor.Char >= 0 && cursor.Char <= max {
-						termbox.SetCursor(cursor.Char, y)
-					}
-				}
-				y++
-				h--
-			} else {
-				scroll--
-			}
-			line = line[max:]
-			if i == cursor.Line && focused {
-				cursor.Char -= max
-			}
-		}
 	}
 }
 
@@ -80,7 +52,22 @@ func draw() {
 	}
 	termbox.SetCursor(mainText.BBox(cursorMark))
 
-	if statusMsg == "" {
+	if focusText == promptText {
+		var s string
+		switch promptMode {
+		case promptOpen:
+			s = "Open file: "
+		case promptSave:
+			s = "Save as: "
+		}
+
+		drawString(0, height-1, s, termbox.ColorDefault, termbox.ColorDefault)
+		x := len(s)
+		s = promptText.Get("1.0", "end")
+		drawString(x, height-1, s, termbox.ColorDefault, termbox.ColorDefault)
+		pos := promptText.Index(cursorMark)
+		termbox.SetCursor(x+pos.Char, height-1)
+	} else if statusMsg == "" {
 		// Draw cursor row,col numbers
 		cursor := mainText.Index(cursorMark)
 		col, _ := mainText.BBox(cursorMark)
@@ -90,16 +77,22 @@ func draw() {
 			statusMsg = fmt.Sprintf("%d,%d-%d", cursor.Line, cursor.Char, col)
 		}
 		x := width - 17
-		drawTextArea(x, height-1, width-x, 1, 0, statusMsg, false)
+		drawString(x, height-1, statusMsg, termbox.ColorDefault,
+			termbox.ColorDefault)
 
 		// Draw scroll percentage
 		x = width - 4
 		view1, view2 := mainText.YView()
 		scrollFraction := view1 / (1.0 - (view2 - view1))
+		if view2 == 1 && view1 == 0 {
+			scrollFraction = 1
+		}
 		statusMsg = fmt.Sprintf("%d%%", int(scrollFraction*100))
-		drawTextArea(x, height-1, width-x, 1, 0, statusMsg, false)
+		drawString(x, height-1, statusMsg, termbox.ColorDefault,
+			termbox.ColorDefault)
 	} else {
-		drawTextArea(0, height-1, width, 1, 0, statusMsg, false)
+		drawString(0, height-1, statusMsg, termbox.ColorDefault,
+			termbox.ColorDefault)
 	}
 
 	err := termbox.Flush()
@@ -111,32 +104,62 @@ func draw() {
 }
 
 func typeRune(ch rune) {
-	mainText.Insert(cursorMark, string(ch))
+	if ch == '\n' && focusText == promptText {
+		focusText = mainText
+		switch promptMode {
+		case promptOpen:
+			openFile(promptText.Get("1.0", "end"))
+		case promptSave:
+			filename = promptText.Get("1.0", "end")
+			saveFile()
+		}
+	} else {
+		focusText.Insert(cursorMark, string(ch))
+	}
 }
 
 func changeLine(d int) {
+	if focusText != mainText {
+		return
+	}
+
 	x, y := mainText.BBox(cursorMark)
 	y += d
 	mainText.MarkSet(cursorMark, fmt.Sprintf("@%d,%d", x, y))
 }
 
-func openFile() {
-	if p, err := ioutil.ReadFile(filename); err == nil {
+func openFile(fn string) {
+	if p, err := ioutil.ReadFile(fn); err == nil {
 		mainText.Delete("1.0", "end")
 		mainText.Insert("1.0", string(p))
 		mainText.MarkSet(cursorMark, "1.0")
-		statusMsg = fmt.Sprintf("Opened \"%s\".", filename)
+		statusMsg = fmt.Sprintf("Opened \"%s\".", fn)
+		filename = fn
 	} else {
 		statusMsg = err.Error()
 	}
 }
 
+func prompt(mode int) {
+	promptText.Delete("1.0", "end")
+	promptMode = mode
+	focusText = promptText
+}
+
 func saveFile() {
-	p := []byte(mainText.Get("1.0", "end"))
-	if err := ioutil.WriteFile(filename, p, 0644); err == nil {
-		statusMsg = fmt.Sprintf("Saved \"%s\".", filename)
+	if focusText != mainText {
+		return
+	}
+
+	if filename == "" {
+		prompt(promptSave)
 	} else {
-		statusMsg = err.Error()
+		p := []byte(mainText.Get("1.0", "end"))
+		if err := ioutil.WriteFile(filename, p, 0644); err == nil {
+			statusMsg = fmt.Sprintf("Saved \"%s\".", filename)
+		} else {
+			statusMsg = err.Error()
+		}
 	}
 }
 
@@ -156,6 +179,15 @@ func suspend() {
 	} else {
 		statusMsg = err.Error()
 	}
+}
+
+func cancel() {
+	if focusText == mainText {
+		return
+	}
+
+	focusText = mainText
+	statusMsg = "Cancelled."
 }
 
 func initFlags() {
@@ -188,21 +220,21 @@ func handleEvent(event termbox.Event) {
 		case termbox.KeyArrowDown, termbox.KeyCtrlJ:
 			changeLine(1)
 		case termbox.KeyArrowLeft, termbox.KeyCtrlH:
-			mainText.MarkSet(cursorMark, fmt.Sprintf("%s-1c", cursorMark))
+			focusText.MarkSet(cursorMark, cursorMark+"-1c")
 		case termbox.KeyArrowRight, termbox.KeyCtrlL:
-			mainText.MarkSet(cursorMark, fmt.Sprintf("%s+1c", cursorMark))
+			focusText.MarkSet(cursorMark, cursorMark+"+1c")
 		case termbox.KeyArrowUp, termbox.KeyCtrlK:
 			changeLine(-1)
 		case termbox.KeyBackspace2: // KeyBackspace == KeyCtrlH
-			mainText.Delete(fmt.Sprintf("%s-1c", cursorMark), cursorMark)
+			focusText.Delete(cursorMark+"-1c", cursorMark)
 		case termbox.KeyDelete:
-			mainText.Delete(cursorMark, fmt.Sprintf("%s+1c", cursorMark))
+			focusText.Delete(cursorMark, cursorMark+"+1c")
 		case termbox.KeyEnd, termbox.KeyCtrlE:
-			mainText.MarkSet(cursorMark, cursorMark+" lineend")
+			focusText.MarkSet(cursorMark, cursorMark+" lineend")
 		case termbox.KeyEnter:
 			typeRune('\n')
 		case termbox.KeyHome, termbox.KeyCtrlA:
-			mainText.MarkSet(cursorMark, cursorMark+" linestart")
+			focusText.MarkSet(cursorMark, cursorMark+" linestart")
 		case termbox.KeyPgdn, termbox.KeyCtrlD:
 			_, height := termbox.Size()
 			changeLine(height - 1)
@@ -213,6 +245,10 @@ func handleEvent(event termbox.Event) {
 			typeRune(' ')
 		case termbox.KeyTab:
 			typeRune('\t')
+		case termbox.KeyCtrlC:
+			cancel()
+		case termbox.KeyCtrlO:
+			prompt(promptOpen)
 		case termbox.KeyCtrlS:
 			saveFile()
 		case termbox.KeyCtrlQ:
@@ -264,12 +300,12 @@ func main() {
 	}
 	defer termbox.Close()
 
-	mainText = tktext.New()
 	mainText.SetWrap(tktext.Char)
 	mainText.SetTabStop(tabStop)
-	mainText.MarkSet(cursorMark, "1.0")
+	mainText.MarkSet(cursorMark, "end")
+	promptText.MarkSet(cursorMark, "end")
 	if filename != "" {
-		openFile()
+		openFile(filename)
 	}
 	draw()
 
