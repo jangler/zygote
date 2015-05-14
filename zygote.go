@@ -17,7 +17,10 @@ const cursorMark = "c"
 
 const (
 	promptOpen = iota
+	promptOpenYN
 	promptSave
+	promptSaveYN
+	promptQuitYN
 )
 
 var (
@@ -104,8 +107,12 @@ func draw() {
 		switch promptMode {
 		case promptOpen:
 			s = "Open file: "
+		case promptOpenYN, promptQuitYN:
+			s = "Abandon unsaved changes? (y/n): "
 		case promptSave:
 			s = "Save as: "
+		case promptSaveYN:
+			s = "Overwrite file? (y/n): "
 		}
 
 		drawStringDefault(0, height-1, s)
@@ -132,8 +139,8 @@ func draw() {
 }
 
 // Enter the rune into the focused buffer. Entering line feed into a prompt
-// confirms it
-func typeRune(ch rune) {
+// confirms it. Returns true if the event loop should stop
+func typeRune(ch rune) bool {
 	if ch == '\n' && focusText == promptText {
 		focusText = mainText
 		switch promptMode {
@@ -141,11 +148,29 @@ func typeRune(ch rune) {
 			openFile(promptText.Get("1.0", "end"))
 		case promptSave:
 			filename = promptText.Get("1.0", "end")
-			saveFile()
+			saveFile(false)
+		}
+	} else if focusText == promptText && (promptMode == promptOpenYN ||
+		promptMode == promptSaveYN || promptMode == promptQuitYN) {
+		if ch == 'y' {
+			switch promptMode {
+			case promptOpenYN:
+				prompt(promptOpen)
+			case promptSaveYN:
+				focusText = mainText
+				saveFile(true)
+			case promptQuitYN:
+				quitChan <- true
+				return true
+			}
+		} else if ch == 'n' {
+			focusText = mainText
 		}
 	} else {
 		focusText.Insert(cursorMark, string(ch))
 	}
+
+	return false
 }
 
 // Change the cursor's display line by the given delta
@@ -166,6 +191,7 @@ func openFile(path string) {
 		mainText.Insert("1.0", string(p))
 		mainText.MarkSet(cursorMark, "1.0")
 		mainText.EditReset()
+		mainText.EditSetModified(false)
 		msgNormal(fmt.Sprintf("Opened \"%s\".", path))
 		filename = path
 	} else {
@@ -181,7 +207,7 @@ func prompt(mode int) {
 }
 
 // If no filename, prompt for one. Otherwise, attempt to write the buffer
-func saveFile() {
+func saveFile(overwrite bool) {
 	if focusText != mainText {
 		return
 	}
@@ -189,8 +215,15 @@ func saveFile() {
 	if filename == "" {
 		prompt(promptSave)
 	} else {
+		_, err := os.Stat(filename)
+		if err == nil && !overwrite {
+			prompt(promptSaveYN)
+			return
+		}
+
 		p := []byte(mainText.Get("1.0", "end"))
 		if err := ioutil.WriteFile(filename, p, 0644); err == nil {
+			mainText.EditSetModified(false)
 			msgNormal(fmt.Sprintf("Saved \"%s\".", filename))
 		} else {
 			msgError(err.Error())
@@ -315,12 +348,20 @@ func handleEvent(event termbox.Event) {
 		case termbox.KeyCtrlC:
 			cancel()
 		case termbox.KeyCtrlO:
-			prompt(promptOpen)
+			if mainText.EditGetModified() {
+				prompt(promptOpenYN)
+			} else {
+				prompt(promptOpen)
+			}
 		case termbox.KeyCtrlS:
-			saveFile()
+			saveFile(true)
 		case termbox.KeyCtrlQ:
-			stop = true
-			quitChan <- true
+			if mainText.EditGetModified() {
+				prompt(promptQuitYN)
+			} else {
+				stop = true
+				quitChan <- true
+			}
 		case termbox.KeyCtrlR:
 			redo()
 		case termbox.KeyCtrlU:
@@ -330,7 +371,7 @@ func handleEvent(event termbox.Event) {
 			suspend()
 		default:
 			if event.Ch != 0 {
-				typeRune(event.Ch)
+				stop = typeRune(event.Ch)
 			} else {
 				msgError(fmt.Sprintf("Unbound key: 0x%04X", event.Key))
 			}
