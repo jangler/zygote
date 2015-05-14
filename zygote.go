@@ -186,7 +186,27 @@ func typeRune(ch rune) bool {
 			unprompt()
 		}
 	} else {
-		focusText.Insert(cursorMark, string(ch))
+		s := string(ch)
+
+		// Autoindent
+		if ch == '\n' {
+			prevLine := focusText.Get(cursorMark+" linestart", cursorMark)
+			i := 0
+			for _, c := range prevLine {
+				if c != ' ' && c != '\t' {
+					break
+				}
+				i++
+			}
+			s += prevLine[:i]
+
+			// Delete empty lines
+			if i == len(prevLine) {
+				focusText.Delete(cursorMark+" linestart", cursorMark)
+			}
+		}
+
+		focusText.Insert(cursorMark, s)
 	}
 
 	return false
