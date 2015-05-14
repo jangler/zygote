@@ -25,27 +25,37 @@ var (
 	tabStop  int
 	filename string
 
+	// Status line
+	statusFg   termbox.Attribute
 	statusMsg  string
 	promptMode int
 
+	// Text buffers
 	mainText   = tktext.New()
 	promptText = tktext.New()
 	focusText  = mainText
 
+	// Event channels
 	eventChan = make(chan termbox.Event)
 	quitChan  = make(chan bool)
 )
 
+// Draw the given string in the given style, starting at the given screen
+// coordinates
 func drawString(x, y int, s string, fg, bg termbox.Attribute) {
 	for i, ch := range s {
 		termbox.SetCell(x+i, y, ch, fg, bg)
 	}
 }
 
+// Draw the given string in the default style, starting at the given screen
+// coordinates
 func drawStringDefault(x, y int, s string) {
 	drawString(x, y, s, termbox.ColorDefault, termbox.ColorDefault)
 }
 
+// Return index position as a string (e.g. "1,1-8") from the given buffer,
+// index, and tabstop
 func indexPos(t *tktext.TkText, index string, ts int) string {
 	cursor := t.Index(index)
 	tabCount := strings.Count(t.Get(index+" linestart", index), "\t")
@@ -56,6 +66,7 @@ func indexPos(t *tktext.TkText, index string, ts int) string {
 	return fmt.Sprintf("%d,%d-%d", cursor.Line, cursor.Char, col)
 }
 
+// Return scroll percentage as a string (e.g. "50%") from TkText.YView() values
 func scrollPercent(view1, view2 float64) string {
 	frac := view1 / (1.0 - (view2 - view1))
 	if view2 == 1 && view1 == 0 {
@@ -64,6 +75,19 @@ func scrollPercent(view1, view2 float64) string {
 	return fmt.Sprintf("%d%%", int(frac*100))
 }
 
+// Set the status message to the given string, with normal attribute
+func msgNormal(s string) {
+	statusMsg = s
+	statusFg = termbox.ColorDefault
+}
+
+// Set the status message to the given string, with error attribute
+func msgError(s string) {
+	statusMsg = s
+	statusFg = termbox.ColorRed
+}
+
+// Draw the entire screen
 func draw() {
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
 	width, height := termbox.Size()
@@ -96,17 +120,19 @@ func draw() {
 		drawStringDefault(width-17, height-1, pos)
 		drawStringDefault(width-4, height-1, scrollPercent(mainText.YView()))
 	} else {
-		drawStringDefault(0, height-1, statusMsg)
+		drawString(0, height-1, statusMsg, statusFg, termbox.ColorDefault)
 	}
 
 	err := termbox.Flush()
 	if err != nil {
-		statusMsg = err.Error()
+		msgError(err.Error())
 	} else {
-		statusMsg = ""
+		msgNormal("")
 	}
 }
 
+// Enter the rune into the focused buffer. Entering line feed into a prompt
+// confirms it
 func typeRune(ch rune) {
 	if ch == '\n' && focusText == promptText {
 		focusText = mainText
@@ -122,6 +148,7 @@ func typeRune(ch rune) {
 	}
 }
 
+// Change the cursor's display line by the given delta
 func changeLine(d int) {
 	if focusText != mainText {
 		return
@@ -132,24 +159,27 @@ func changeLine(d int) {
 	mainText.MarkSet(cursorMark, fmt.Sprintf("@%d,%d", x, y))
 }
 
-func openFile(fn string) {
-	if p, err := ioutil.ReadFile(fn); err == nil {
+// Attempt to read the file with the given path into the buffer
+func openFile(path string) {
+	if p, err := ioutil.ReadFile(path); err == nil {
 		mainText.Delete("1.0", "end")
 		mainText.Insert("1.0", string(p))
 		mainText.MarkSet(cursorMark, "1.0")
-		statusMsg = fmt.Sprintf("Opened \"%s\".", fn)
-		filename = fn
+		msgNormal(fmt.Sprintf("Opened \"%s\".", path))
+		filename = path
 	} else {
-		statusMsg = err.Error()
+		msgError(err.Error())
 	}
 }
 
+// Enter the given prompt mode
 func prompt(mode int) {
 	promptText.Delete("1.0", "end")
 	promptMode = mode
 	focusText = promptText
 }
 
+// If no filename, prompt for one. Otherwise, attempt to write the buffer
 func saveFile() {
 	if focusText != mainText {
 		return
@@ -160,13 +190,14 @@ func saveFile() {
 	} else {
 		p := []byte(mainText.Get("1.0", "end"))
 		if err := ioutil.WriteFile(filename, p, 0644); err == nil {
-			statusMsg = fmt.Sprintf("Saved \"%s\".", filename)
+			msgNormal(fmt.Sprintf("Saved \"%s\".", filename))
 		} else {
-			statusMsg = err.Error()
+			msgError(err.Error())
 		}
 	}
 }
 
+// Suspend the process (like ^Z in bash)
 func suspend() {
 	if proc, err := os.FindProcess(os.Getpid()); err == nil {
 		// Clean up and send SIGSTOP to this process
@@ -181,19 +212,21 @@ func suspend() {
 		draw()
 		getEvent()
 	} else {
-		statusMsg = err.Error()
+		msgError(err.Error())
 	}
 }
 
+// Cancel out of a prompt
 func cancel() {
 	if focusText == mainText {
 		return
 	}
 
 	focusText = mainText
-	statusMsg = "Cancelled."
+	msgNormal("Cancelled.")
 }
 
+// Initialize command-line flags and args
 func initFlags() {
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "Usage: %s [<option>...] [<file>]", os.Args[0])
@@ -212,12 +245,13 @@ func initFlags() {
 	}
 }
 
+// Take appropriate action for the given termbox event
 func handleEvent(event termbox.Event) {
 	stop := false
 
 	switch event.Type {
 	case termbox.EventError:
-		statusMsg = event.Err.Error()
+		msgError(event.Err.Error())
 		draw()
 	case termbox.EventKey:
 		switch event.Key {
@@ -265,7 +299,7 @@ func handleEvent(event termbox.Event) {
 			if event.Ch != 0 {
 				typeRune(event.Ch)
 			} else {
-				statusMsg = fmt.Sprintf("Unbound key: 0x%04X", event.Key)
+				msgError(fmt.Sprintf("Unbound key: 0x%04X", event.Key))
 			}
 		}
 		if !stop {
@@ -280,10 +314,12 @@ func handleEvent(event termbox.Event) {
 	}
 }
 
+// Poll for an event and send it to the event channel. Blocking function call
 func getEvent() {
 	eventChan <- termbox.PollEvent()
 }
 
+// Event loop
 func handleEvents() {
 	for {
 		select {
@@ -295,6 +331,7 @@ func handleEvents() {
 	}
 }
 
+// Entry point
 func main() {
 	initFlags()
 
