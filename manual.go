@@ -20,4 +20,5 @@ Commands:
 Modes:
 
   M-m  Manual
+  M-s  Select
 `

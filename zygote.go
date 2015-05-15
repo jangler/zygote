@@ -13,9 +13,13 @@ import (
 	"github.com/nsf/termbox-go"
 )
 
-const cursorMark = "c"
-
 const (
+	cursorMark = "c"
+	selMark    = "s"
+
+	selFg = termbox.ColorBlack
+	selBg = termbox.ColorBlue
+
 	promptOpen = iota
 	promptOpenYN
 	promptSave
@@ -50,7 +54,7 @@ var (
 	quitChan  = make(chan bool)
 
 	// Modes
-	modeManual bool
+	modeManual, modeSelect bool
 )
 
 // Draw the given string in the given style, starting at the given screen
@@ -100,6 +104,21 @@ func msgError(s string) {
 	statusFg = termbox.ColorRed
 }
 
+// Returns a status line string describing active modes
+func modeString() string {
+	modes := make([]string, 0)
+	if modeManual {
+		modes = append(modes, "manual (M-m)")
+	}
+	if modeSelect {
+		modes = append(modes, "select (M-s)")
+	}
+	if len(modes) > 0 {
+		return "Modes: " + strings.Join(modes, ", ")
+	}
+	return ""
+}
+
 // Draw the entire screen
 func draw() {
 	termbox.Clear(termbox.ColorDefault, termbox.ColorDefault)
@@ -112,8 +131,35 @@ func draw() {
 	}
 	drawText.SetSize(width, height-1)
 	drawText.See(cursorMark)
+	selX, selY := drawText.BBox(selMark)
+	curX, curY := drawText.BBox(cursorMark)
+	if selY > curY || (selY == curY && selX > curX) {
+		selX, selY, curX, curY = curX, curY, selX, selY
+	}
 	for i, line := range drawText.GetScreenLines() {
-		drawStringDefault(0, i, line)
+		if !modeSelect {
+			drawStringDefault(0, i, line)
+		} else if i > selY {
+			if i < curY {
+				drawString(0, i, line, selFg, selBg)
+			} else if i == curY {
+				drawString(0, i, line[:curX], selFg, selBg)
+				drawStringDefault(curX, i, line[curX:])
+			} else {
+				drawStringDefault(0, i, line)
+			}
+		} else if i == selY {
+			if i < curY {
+				drawStringDefault(0, i, line[:selX])
+				drawString(selX, i, line[selX:], selFg, selBg)
+			} else if i == curY {
+				drawStringDefault(0, i, line[:selX])
+				drawString(selX, i, line[selX:curX], selFg, selBg)
+				drawStringDefault(curX, i, line[curX:])
+			}
+		} else {
+			drawStringDefault(0, i, line)
+		}
 	}
 	termbox.SetCursor(drawText.BBox(cursorMark))
 
@@ -133,11 +179,23 @@ func draw() {
 		drawStringDefault(0, height-1, s)
 		x := len(s)
 		s = promptText.Get("1.0", "end")
-		drawStringDefault(x, height-1, s)
+		if modeSelect {
+			selX, _ := promptText.BBox(selMark)
+			curX, _ := promptText.BBox(cursorMark)
+			if selX > curX {
+				selX, curX = curX, selX
+			}
+			drawStringDefault(x, height-1, s[:selX])
+			drawString(x+selX, height-1, s[selX:curX], selFg, selBg)
+			drawStringDefault(x+curX, height-1, s[curX:])
+		} else {
+			drawStringDefault(x, height-1, s)
+		}
 		pos := promptText.Index(cursorMark)
 		termbox.SetCursor(x+pos.Char, height-1)
 	} else if statusMsg == "" {
-		// Draw cursor row,col numbers and scroll percentage
+		// Draw modes, cursor row,col numbers, and scroll percentage
+		drawStringDefault(0, height-1, modeString())
 		pos := indexPos(drawText, cursorMark, tabStop)
 		drawStringDefault(width-17, height-1, pos)
 		drawStringDefault(width-4, height-1, scrollPercent(drawText.YView()))
@@ -358,8 +416,34 @@ func toggleManual() {
 			manualText.Insert("end", manualString)
 			manualText.EditReset()
 			manualText.MarkSet(cursorMark, "1.0")
+			manualText.MarkSet(selMark, cursorMark)
+			manualText.MarkSetGravity(selMark, tktext.Left)
 		}
 		unprompt()
+	}
+}
+
+// Toggle select mode
+func toggleSelect() {
+	modeSelect = !modeSelect
+	mainText.MarkSet(selMark, cursorMark)
+	if manualText != nil {
+		manualText.MarkSet(selMark, cursorMark)
+	}
+	promptText.MarkSet(selMark, cursorMark)
+}
+
+// Delete text. If there is a selection, delete the selection. Otherwise,
+// select text from the cursor to the modifier, then delete it.
+func del(modifier string) {
+	if !modeSelect || focusText.Compare(selMark, cursorMark) == 0 {
+		focusText.MarkSet(selMark, cursorMark)
+		focusText.MarkSet(cursorMark, cursorMark+modifier)
+	}
+	if focusText.Compare(selMark, cursorMark) < 0 {
+		focusText.Delete(selMark, cursorMark)
+	} else {
+		focusText.Delete(cursorMark, selMark)
 	}
 }
 
@@ -389,9 +473,9 @@ func handleEvent(event termbox.Event) {
 			changeLine(-1)
 			sep, resetCol = true, false
 		case termbox.KeyBackspace2: // KeyBackspace == KeyCtrlH
-			focusText.Delete(cursorMark+"-1c", cursorMark)
+			del("-1c")
 		case termbox.KeyDelete:
-			focusText.Delete(cursorMark, cursorMark+"+1c")
+			del("+1c")
 		case termbox.KeyEnd:
 			focusText.MarkSet(cursorMark, cursorMark+" lineend")
 			sep = true
@@ -441,6 +525,8 @@ func handleEvent(event termbox.Event) {
 				switch event.Ch {
 				case 'm':
 					toggleManual()
+				case 's':
+					toggleSelect()
 				default:
 					msgError("Unbound key: M-" + string(event.Ch))
 				}
@@ -500,7 +586,11 @@ func main() {
 	mainText.SetWrap(tktext.Char)
 	mainText.SetTabStop(tabStop)
 	mainText.MarkSet(cursorMark, "end")
+	mainText.MarkSet(selMark, cursorMark)
+	mainText.MarkSetGravity(selMark, tktext.Left)
 	promptText.MarkSet(cursorMark, "end")
+	promptText.MarkSet(selMark, cursorMark)
+	promptText.MarkSetGravity(selMark, tktext.Left)
 	if filename != "" {
 		openFile(filename)
 	}
