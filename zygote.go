@@ -376,35 +376,35 @@ func handleEvent(event termbox.Event) {
 		resetCol := true // Whether cursorCol should be reset
 
 		switch event.Key {
-		case termbox.KeyArrowDown, termbox.KeyCtrlJ:
+		case termbox.KeyArrowDown:
 			changeLine(1)
 			sep, resetCol = true, false
-		case termbox.KeyArrowLeft, termbox.KeyCtrlH:
+		case termbox.KeyArrowLeft:
 			focusText.MarkSet(cursorMark, cursorMark+"-1c")
 			sep = true
-		case termbox.KeyArrowRight, termbox.KeyCtrlL:
+		case termbox.KeyArrowRight:
 			focusText.MarkSet(cursorMark, cursorMark+"+1c")
 			sep = true
-		case termbox.KeyArrowUp, termbox.KeyCtrlK:
+		case termbox.KeyArrowUp:
 			changeLine(-1)
 			sep, resetCol = true, false
 		case termbox.KeyBackspace2: // KeyBackspace == KeyCtrlH
 			focusText.Delete(cursorMark+"-1c", cursorMark)
 		case termbox.KeyDelete:
 			focusText.Delete(cursorMark, cursorMark+"+1c")
-		case termbox.KeyEnd, termbox.KeyCtrlE:
+		case termbox.KeyEnd:
 			focusText.MarkSet(cursorMark, cursorMark+" lineend")
 			sep = true
 		case termbox.KeyEnter:
 			typeRune('\n')
-		case termbox.KeyHome, termbox.KeyCtrlA:
+		case termbox.KeyHome:
 			focusText.MarkSet(cursorMark, cursorMark+" linestart")
 			sep = true
-		case termbox.KeyPgdn, termbox.KeyCtrlN:
+		case termbox.KeyPgdn:
 			_, height := termbox.Size()
 			changeLine(height - 1)
 			sep, resetCol = true, false
-		case termbox.KeyPgup, termbox.KeyCtrlP:
+		case termbox.KeyPgup:
 			_, height := termbox.Size()
 			changeLine(-height + 1)
 			sep, resetCol = true, false
