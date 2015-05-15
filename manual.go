@@ -21,5 +21,6 @@ Modes:
 
   M-m  Manual
   M-s  Select
+  M-v  View
   M-w  Word
 `

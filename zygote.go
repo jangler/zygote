@@ -55,7 +55,7 @@ var (
 	quitChan  = make(chan bool)
 
 	// Modes
-	modeManual, modeSelect, modeWord bool
+	modeManual, modeSelect, modeView, modeWord bool
 
 	// Regexps
 	wordRegexp  = regexp.MustCompile(`\w`)
@@ -118,6 +118,9 @@ func modeString() string {
 	if modeSelect {
 		modes = append(modes, "select (M-s)")
 	}
+	if modeView {
+		modes = append(modes, "view (M-v)")
+	}
 	if modeWord {
 		modes = append(modes, "word (M-w)")
 	}
@@ -138,7 +141,9 @@ func draw() {
 		drawText.EditUndo() // No changing the manual!
 	}
 	drawText.SetSize(width, height-1)
-	drawText.See(cursorMark)
+	if !modeView {
+		drawText.See(cursorMark)
+	}
 	selX, selY := drawText.BBox(selMark)
 	curX, curY := drawText.BBox(cursorMark)
 	if selY > curY || (selY == curY && selX > curX) {
@@ -169,7 +174,12 @@ func draw() {
 			drawStringDefault(0, i, line)
 		}
 	}
-	termbox.SetCursor(drawText.BBox(cursorMark))
+	curX, curY = drawText.BBox(cursorMark)
+	if curY >= 0 && curY < height-1 {
+		termbox.SetCursor(curX, curY)
+	} else {
+		termbox.HideCursor()
+	}
 
 	if focusText == promptText {
 		var s string
@@ -531,8 +541,12 @@ func handleEvent(event termbox.Event) {
 
 		switch event.Key {
 		case termbox.KeyArrowDown:
-			changeLine(1)
-			sep, resetCol = true, false
+			if modeView && focusText != promptText {
+				focusText.YViewScroll(1)
+			} else {
+				changeLine(1)
+				sep, resetCol = true, false
+			}
 		case termbox.KeyArrowLeft:
 			moveCursor("-1c")
 			sep = true
@@ -540,8 +554,12 @@ func handleEvent(event termbox.Event) {
 			moveCursor("+1c")
 			sep = true
 		case termbox.KeyArrowUp:
-			changeLine(-1)
-			sep, resetCol = true, false
+			if modeView && focusText != promptText {
+				focusText.YViewScroll(-1)
+			} else {
+				changeLine(-1)
+				sep, resetCol = true, false
+			}
 		case termbox.KeyBackspace2: // KeyBackspace == KeyCtrlH
 			del("-1c")
 		case termbox.KeyDelete:
@@ -556,12 +574,20 @@ func handleEvent(event termbox.Event) {
 			sep = true
 		case termbox.KeyPgdn:
 			_, height := termbox.Size()
-			changeLine(height - 1)
-			sep, resetCol = true, false
+			if modeView && focusText != promptText {
+				focusText.YViewScroll(height - 1)
+			} else {
+				changeLine(height - 1)
+				sep, resetCol = true, false
+			}
 		case termbox.KeyPgup:
 			_, height := termbox.Size()
-			changeLine(-height + 1)
-			sep, resetCol = true, false
+			if modeView && focusText != promptText {
+				focusText.YViewScroll(-(height - 1))
+			} else {
+				changeLine(height - 1)
+				sep, resetCol = true, false
+			}
 		case termbox.KeySpace:
 			typeRune(' ')
 		case termbox.KeyTab:
@@ -597,6 +623,8 @@ func handleEvent(event termbox.Event) {
 					toggleManual()
 				case 's':
 					toggleSelect()
+				case 'v':
+					modeView = !modeView
 				case 'w':
 					modeWord = !modeWord
 				default:
