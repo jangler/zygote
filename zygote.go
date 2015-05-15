@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -54,7 +55,11 @@ var (
 	quitChan  = make(chan bool)
 
 	// Modes
-	modeManual, modeSelect bool
+	modeManual, modeSelect, modeWord bool
+
+	// Regexps
+	wordRegexp  = regexp.MustCompile(`\w`)
+	spaceRegexp = regexp.MustCompile(`\s`)
 )
 
 // Draw the given string in the given style, starting at the given screen
@@ -112,6 +117,9 @@ func modeString() string {
 	}
 	if modeSelect {
 		modes = append(modes, "select (M-s)")
+	}
+	if modeWord {
+		modes = append(modes, "word (M-w)")
 	}
 	if len(modes) > 0 {
 		return "Modes: " + strings.Join(modes, ", ")
@@ -433,12 +441,74 @@ func toggleSelect() {
 	promptText.MarkSet(selMark, cursorMark)
 }
 
+// This function is nasty.
+func moveCursor(modifier string) {
+	if modeWord {
+		pos := focusText.Index(cursorMark)
+		line := focusText.Get(cursorMark+" linestart", cursorMark+" lineend")
+		if modifier == "+1c" {
+			llen := len(line)
+			if pos.Char == llen {
+				if focusText != promptText {
+					pos.Line++
+					pos = focusText.Index(pos.String() + " linestart")
+				}
+			} else {
+				if wordRegexp.Match([]byte{line[pos.Char]}) {
+					for pos.Char < llen &&
+						wordRegexp.Match([]byte{line[pos.Char]}) {
+						pos.Char++
+					}
+				} else {
+					for pos.Char < llen &&
+						!wordRegexp.Match([]byte{line[pos.Char]}) {
+						pos.Char++
+					}
+				}
+				for pos.Char < llen &&
+					spaceRegexp.Match([]byte{line[pos.Char]}) {
+					pos.Char++
+				}
+			}
+			focusText.MarkSet(cursorMark, pos.String())
+		} else if modeWord && modifier == "-1c" {
+			if pos.Char == 0 {
+				if focusText != promptText {
+					pos.Line--
+					pos = focusText.Index(pos.String() + " lineend")
+				}
+			} else {
+				if wordRegexp.Match([]byte{line[pos.Char-1]}) {
+					for pos.Char > 0 &&
+						wordRegexp.Match([]byte{line[pos.Char-1]}) {
+						pos.Char--
+					}
+				} else {
+					for pos.Char > 0 &&
+						!wordRegexp.Match([]byte{line[pos.Char-1]}) {
+						pos.Char--
+					}
+				}
+				for pos.Char > 0 &&
+					spaceRegexp.Match([]byte{line[pos.Char-1]}) {
+					pos.Char--
+				}
+			}
+			focusText.MarkSet(cursorMark, pos.String())
+		} else {
+			focusText.MarkSet(cursorMark, cursorMark+modifier)
+		}
+	} else {
+		focusText.MarkSet(cursorMark, cursorMark+modifier)
+	}
+}
+
 // Delete text. If there is a selection, delete the selection. Otherwise,
 // select text from the cursor to the modifier, then delete it.
 func del(modifier string) {
 	if !modeSelect || focusText.Compare(selMark, cursorMark) == 0 {
 		focusText.MarkSet(selMark, cursorMark)
-		focusText.MarkSet(cursorMark, cursorMark+modifier)
+		moveCursor(modifier)
 	}
 	if focusText.Compare(selMark, cursorMark) < 0 {
 		focusText.Delete(selMark, cursorMark)
@@ -464,10 +534,10 @@ func handleEvent(event termbox.Event) {
 			changeLine(1)
 			sep, resetCol = true, false
 		case termbox.KeyArrowLeft:
-			focusText.MarkSet(cursorMark, cursorMark+"-1c")
+			moveCursor("-1c")
 			sep = true
 		case termbox.KeyArrowRight:
-			focusText.MarkSet(cursorMark, cursorMark+"+1c")
+			moveCursor("+1c")
 			sep = true
 		case termbox.KeyArrowUp:
 			changeLine(-1)
@@ -527,6 +597,8 @@ func handleEvent(event termbox.Event) {
 					toggleManual()
 				case 's':
 					toggleSelect()
+				case 'w':
+					modeWord = !modeWord
 				default:
 					msgError("Unbound key: M-" + string(event.Ch))
 				}
