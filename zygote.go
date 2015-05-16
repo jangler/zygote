@@ -30,6 +30,7 @@ const (
 	promptSaveYN
 	promptWrite
 	promptWriteWhich
+	promptExecute
 	promptYank
 )
 
@@ -72,6 +73,7 @@ var (
 	// Regexps
 	wordRegexp  = regexp.MustCompile(`\w`)
 	spaceRegexp = regexp.MustCompile(`\s`)
+	formRegexp  = regexp.MustCompile(`^<.+?>`)
 )
 
 // Draw the given string in the given style, starting at the given screen
@@ -213,6 +215,8 @@ func draw() {
 			s = "Write: "
 		case promptWriteWhich:
 			s = "Write into register: "
+		case promptExecute:
+			s = "Execute from register: "
 		case promptYank:
 			s = "Yank into register: "
 		}
@@ -317,6 +321,136 @@ func getSelText() string {
 	return focusText.Get(cursorMark, cursorMark+"+1c")
 }
 
+func handleKey(s string) bool {
+	stop := false
+	sep := false     // Whether an undo separator should be inserted
+	resetCol := true // Whether cursorCol should be reset
+
+	switch s {
+	case "<Down>":
+		if modeView && focusText != promptText {
+			focusText.YViewScroll(1)
+		} else {
+			changeLine(1)
+			sep, resetCol = true, false
+		}
+	case "<Left>":
+		moveCursor("-1c")
+		sep = true
+	case "<Right>":
+		moveCursor("+1c")
+		sep = true
+	case "<Up>":
+		if modeView && focusText != promptText {
+			focusText.YViewScroll(-1)
+		} else {
+			changeLine(-1)
+			sep, resetCol = true, false
+		}
+	case "<Backspace>", "<C-8>":
+		del("-1c")
+	case "<Delete>":
+		del("+1c")
+	case "<End>":
+		focusText.MarkSet(cursorMark, cursorMark+" lineend")
+		sep = true
+	case "<Enter>", "<C-m>":
+		typeRune('\n')
+	case "<Home>":
+		focusText.MarkSet(cursorMark, cursorMark+" linestart")
+		sep = true
+	case "<PgDn>":
+		_, height := termbox.Size()
+		if modeView && focusText != promptText {
+			focusText.YViewScroll(height - 1)
+		} else {
+			changeLine(height - 1)
+			sep, resetCol = true, false
+		}
+	case "<PgUp>":
+		_, height := termbox.Size()
+		if modeView && focusText != promptText {
+			focusText.YViewScroll(-(height - 1))
+		} else {
+			changeLine(-(height - 1))
+			sep, resetCol = true, false
+		}
+	case "<Space>":
+		typeRune(' ')
+	case "<Tab>", "<C-i>":
+		typeRune('\t')
+	case "<C-c>":
+		cancel()
+	case "<C-o>":
+		if mainText.EditGetModified() {
+			prompt(promptOpenYN)
+		} else {
+			prompt(promptOpen)
+		}
+	case "<C-p>":
+		prompt(promptPut)
+	case "<C-s>":
+		saveFile(true)
+	case "<C-q>":
+		if mainText.EditGetModified() {
+			prompt(promptQuitYN)
+		} else {
+			stop = true
+			quitChan <- true
+		}
+	case "<C-r>":
+		redo()
+	case "<C-u>":
+		undo()
+	case "<C-w>":
+		prompt(promptWriteWhich)
+	case "<C-x>":
+		prompt(promptExecute)
+	case "<C-y>":
+		prompt(promptYank)
+	case "<C-z>":
+		stop = true
+		suspend()
+	case "<M-m>":
+		toggleManual()
+	case "<M-s>":
+		toggleSelect()
+	case "<M-v>":
+		modeView = !modeView
+	case "<M-w>":
+		modeWord = !modeWord
+	default:
+		if len(s) > 1 {
+			msgError("Unbound key: " + s)
+		} else {
+			// Loop only iterates once
+			for _, ch := range s {
+				stop = typeRune(ch)
+			}
+		}
+	}
+
+	if resetCol {
+		cursorCol[focusText] = 0
+	}
+	if sep && focusText == mainText {
+		mainText.EditSeparator()
+	}
+	return stop
+}
+
+func execString(s string) {
+	for len(s) > 0 {
+		if match := formRegexp.FindString(s); match != "" {
+			handleKey(match)
+			s = s[len(match):]
+		} else {
+			handleKey(s[0:1])
+			s = s[1:]
+		}
+	}
+}
+
 // Enter the rune into the focused buffer. Entering line feed into a prompt
 // confirms it. Returns true if the event loop should stop
 func typeRune(ch rune) bool {
@@ -337,7 +471,8 @@ func typeRune(ch rune) bool {
 			unprompt()
 		}
 	} else if focusText == promptText && (promptMode == promptPut ||
-		promptMode == promptWriteWhich || promptMode == promptYank) {
+		promptMode == promptWriteWhich || promptMode == promptYank ||
+		promptMode == promptExecute) {
 		regRune = ch
 		unprompt()
 		switch promptMode {
@@ -345,6 +480,8 @@ func typeRune(ch rune) bool {
 			focusText.Insert(cursorMark, getRegister(ch))
 		case promptWriteWhich:
 			prompt(promptWrite)
+		case promptExecute:
+			execString(getRegister(ch))
 		case promptYank:
 			setRegister(ch, getSelText())
 		}
@@ -628,119 +765,7 @@ func handleEvent(event termbox.Event) {
 		msgError(event.Err.Error())
 		draw()
 	case termbox.EventKey:
-		sep := false     // Whether an undo separator should be inserted
-		resetCol := true // Whether cursorCol should be reset
-
-		switch event.Key {
-		case termbox.KeyArrowDown:
-			if modeView && focusText != promptText {
-				focusText.YViewScroll(1)
-			} else {
-				changeLine(1)
-				sep, resetCol = true, false
-			}
-		case termbox.KeyArrowLeft:
-			moveCursor("-1c")
-			sep = true
-		case termbox.KeyArrowRight:
-			moveCursor("+1c")
-			sep = true
-		case termbox.KeyArrowUp:
-			if modeView && focusText != promptText {
-				focusText.YViewScroll(-1)
-			} else {
-				changeLine(-1)
-				sep, resetCol = true, false
-			}
-		case termbox.KeyBackspace2: // KeyBackspace == KeyCtrlH
-			del("-1c")
-		case termbox.KeyDelete:
-			del("+1c")
-		case termbox.KeyEnd:
-			focusText.MarkSet(cursorMark, cursorMark+" lineend")
-			sep = true
-		case termbox.KeyEnter:
-			typeRune('\n')
-		case termbox.KeyHome:
-			focusText.MarkSet(cursorMark, cursorMark+" linestart")
-			sep = true
-		case termbox.KeyPgdn:
-			_, height := termbox.Size()
-			if modeView && focusText != promptText {
-				focusText.YViewScroll(height - 1)
-			} else {
-				changeLine(height - 1)
-				sep, resetCol = true, false
-			}
-		case termbox.KeyPgup:
-			_, height := termbox.Size()
-			if modeView && focusText != promptText {
-				focusText.YViewScroll(-(height - 1))
-			} else {
-				changeLine(-(height - 1))
-				sep, resetCol = true, false
-			}
-		case termbox.KeySpace:
-			typeRune(' ')
-		case termbox.KeyTab:
-			typeRune('\t')
-		case termbox.KeyCtrlC:
-			cancel()
-		case termbox.KeyCtrlO:
-			if mainText.EditGetModified() {
-				prompt(promptOpenYN)
-			} else {
-				prompt(promptOpen)
-			}
-		case termbox.KeyCtrlP:
-			prompt(promptPut)
-		case termbox.KeyCtrlS:
-			saveFile(true)
-		case termbox.KeyCtrlQ:
-			if mainText.EditGetModified() {
-				prompt(promptQuitYN)
-			} else {
-				stop = true
-				quitChan <- true
-			}
-		case termbox.KeyCtrlR:
-			redo()
-		case termbox.KeyCtrlU:
-			undo()
-		case termbox.KeyCtrlW:
-			prompt(promptWriteWhich)
-		case termbox.KeyCtrlY:
-			prompt(promptYank)
-		case termbox.KeyCtrlZ:
-			stop = true
-			suspend()
-		default:
-			if event.Mod == termbox.ModAlt {
-				switch event.Ch {
-				case 'm':
-					toggleManual()
-				case 's':
-					toggleSelect()
-				case 'v':
-					modeView = !modeView
-				case 'w':
-					modeWord = !modeWord
-				default:
-					msgError("Unbound key: M-" + string(event.Ch))
-				}
-			} else if event.Ch != 0 {
-				stop = typeRune(event.Ch)
-			} else {
-				msgError(fmt.Sprintf("Unbound key: 0x%04X", event.Key))
-			}
-		}
-
-		if resetCol {
-			cursorCol[focusText] = 0
-		}
-		if sep && focusText == mainText {
-			mainText.EditSeparator()
-		}
+		stop = handleKey(keyString(event))
 		if !stop {
 			draw()
 		}
@@ -789,6 +814,7 @@ func main() {
 	promptText.MarkSet(cursorMark, "end")
 	promptText.MarkSet(selMark, cursorMark)
 	promptText.MarkSetGravity(selMark, tktext.Left)
+	msgNormal("Zygote, alpha version. Press M-m to view manual.")
 	if filename != "" {
 		openFile(filename)
 	}
