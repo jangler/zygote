@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -23,14 +24,18 @@ const (
 
 	promptOpen = iota
 	promptOpenYN
+	promptPut
+	promptQuitYN
 	promptSave
 	promptSaveYN
-	promptQuitYN
+	promptWrite
+	promptWriteWhich
+	promptYank
 )
 
 var (
 	// Command-line flags/args
-	tabStop  int
+	tabStop  = 8
 	filename string
 
 	// Status line
@@ -49,6 +54,13 @@ var (
 		mainText:   0,
 		manualText: 0,
 	}
+
+	register = map[rune]string{
+		'F': filename,
+		'L': "1",
+		'T': fmt.Sprintf("%d", tabStop),
+	}
+	regRune rune
 
 	// Event channels
 	eventChan = make(chan termbox.Event)
@@ -144,8 +156,11 @@ func draw() {
 	if !modeView {
 		drawText.See(cursorMark)
 	}
-	selX, selY := drawText.BBox(selMark)
 	curX, curY := drawText.BBox(cursorMark)
+	selX, selY := curX, curY
+	if modeSelect {
+		selX, selY = drawText.BBox(selMark)
+	}
 	if selY > curY || (selY == curY && selX > curX) {
 		selX, selY, curX, curY = curX, curY, selX, selY
 	}
@@ -188,10 +203,18 @@ func draw() {
 			s = "Open file: "
 		case promptOpenYN, promptQuitYN:
 			s = "Abandon unsaved changes? (y/n): "
+		case promptPut:
+			s = "Put from register: "
 		case promptSave:
 			s = "Save as: "
 		case promptSaveYN:
 			s = "Overwrite file? (y/n): "
+		case promptWrite:
+			s = "Write: "
+		case promptWriteWhich:
+			s = "Write into register: "
+		case promptYank:
+			s = "Yank into register: "
 		}
 
 		drawStringDefault(0, height-1, s)
@@ -238,19 +261,66 @@ func unprompt() {
 	}
 }
 
+func getRegister(ch rune) string {
+	var s string
+	switch ch {
+	case 'F':
+		s = filename
+	case 'L':
+		s = fmt.Sprintf("%d", focusText.Index(cursorMark).Line)
+	case 'T':
+		s = fmt.Sprintf("%d", tabStop)
+	default:
+		s = register[ch]
+	}
+	return s
+}
+
+func setRegister(ch rune, s string) {
+	switch ch {
+	case 'F':
+		filename = s
+	case 'L':
+		if n, err := strconv.ParseInt(s, 10, 0); err == nil {
+			if n < 0 {
+				n = 0
+			}
+			pos := focusText.Index(cursorMark)
+			focusText.MarkSet(cursorMark,
+				fmt.Sprintf("%d.%d", n, pos.Char))
+		} else {
+			msgError(err.Error())
+		}
+	case 'T':
+		if n, err := strconv.ParseInt(s, 10, 0); err == nil {
+			if n < 1 {
+				n = 1
+			}
+			tabStop = int(n)
+			mainText.SetTabStop(tabStop)
+		} else {
+			msgError(err.Error())
+		}
+	default:
+		register[ch] = s
+	}
+}
+
+func getSelText() string {
+	if modeSelect && focusText.Compare(cursorMark, selMark) != 0 {
+		if focusText.Compare(selMark, cursorMark) < 0 {
+			return focusText.Get(selMark, cursorMark)
+		} else {
+			return focusText.Get(cursorMark, selMark)
+		}
+	}
+	return focusText.Get(cursorMark, cursorMark+"+1c")
+}
+
 // Enter the rune into the focused buffer. Entering line feed into a prompt
 // confirms it. Returns true if the event loop should stop
 func typeRune(ch rune) bool {
-	if ch == '\n' && focusText == promptText {
-		unprompt()
-		switch promptMode {
-		case promptOpen:
-			openFile(promptText.Get("1.0", "end"))
-		case promptSave:
-			filename = promptText.Get("1.0", "end")
-			saveFile(false)
-		}
-	} else if focusText == promptText && (promptMode == promptOpenYN ||
+	if focusText == promptText && (promptMode == promptOpenYN ||
 		promptMode == promptSaveYN || promptMode == promptQuitYN) {
 		if ch == 'y' {
 			switch promptMode {
@@ -265,6 +335,29 @@ func typeRune(ch rune) bool {
 			}
 		} else if ch == 'n' {
 			unprompt()
+		}
+	} else if focusText == promptText && (promptMode == promptPut ||
+		promptMode == promptWriteWhich || promptMode == promptYank) {
+		regRune = ch
+		unprompt()
+		switch promptMode {
+		case promptPut:
+			focusText.Insert(cursorMark, getRegister(ch))
+		case promptWriteWhich:
+			prompt(promptWrite)
+		case promptYank:
+			setRegister(ch, getSelText())
+		}
+	} else if ch == '\n' && focusText == promptText {
+		unprompt()
+		switch promptMode {
+		case promptOpen:
+			openFile(promptText.Get("1.0", "end"))
+		case promptSave:
+			filename = promptText.Get("1.0", "end")
+			saveFile(false)
+		case promptWrite:
+			setRegister(regRune, promptText.Get("1.0", "end"))
 		}
 	} else {
 		s := string(ch)
@@ -391,11 +484,10 @@ func cancel() {
 // Initialize command-line flags and args
 func initFlags() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [<option>...] [<file>]", os.Args[0])
-		fmt.Fprint(os.Stderr, "\n\nOptions:\n")
-		flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "Usage: %s [<file>]\n", os.Args[0])
+		//fmt.Fprint(os.Stderr, "\n\nOptions:\n")
+		//flag.PrintDefaults()
 	}
-	flag.IntVar(&tabStop, "tabstop", 8, "number of columns in a tab stop")
 
 	flag.Parse()
 
@@ -585,7 +677,7 @@ func handleEvent(event termbox.Event) {
 			if modeView && focusText != promptText {
 				focusText.YViewScroll(-(height - 1))
 			} else {
-				changeLine(height - 1)
+				changeLine(-(height - 1))
 				sep, resetCol = true, false
 			}
 		case termbox.KeySpace:
@@ -600,6 +692,8 @@ func handleEvent(event termbox.Event) {
 			} else {
 				prompt(promptOpen)
 			}
+		case termbox.KeyCtrlP:
+			prompt(promptPut)
 		case termbox.KeyCtrlS:
 			saveFile(true)
 		case termbox.KeyCtrlQ:
@@ -613,6 +707,10 @@ func handleEvent(event termbox.Event) {
 			redo()
 		case termbox.KeyCtrlU:
 			undo()
+		case termbox.KeyCtrlW:
+			prompt(promptWriteWhich)
+		case termbox.KeyCtrlY:
+			prompt(promptYank)
 		case termbox.KeyCtrlZ:
 			stop = true
 			suspend()
