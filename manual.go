@@ -41,7 +41,7 @@ number of modes can be active at once.
 REGISTERS
 
 Registers are string variables identified by a single UTF-8 character. Some
-registers identified by a capital letter have special meaning to Zygote.
+registers identified by capital letters have special meaning to Zygote.
 
   F  Filename/path
   L  Line number of cursor
@@ -53,7 +53,8 @@ CONFIGURATION
 When Zygote starts, it reads from a configuration file, by default ~/.zygoterc,
 and interprets each line as if it were executed by the C-x command; that is,
 as a series of key inputs. Non-printable keys and chords can be represented by
-forms such as <Enter>, <C-w>, and <M-w>.
+forms such as <Enter>, <C-w>, and <M-w>. To have such a form interpreted as
+literal text, prefix it with a backslash, as in \<C-q>.
 
 
 CONTRIBUTING

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"os/user"
 	"regexp"
 	"strconv"
 	"strings"
@@ -36,8 +37,7 @@ const (
 
 var (
 	// Command-line flags/args
-	tabStop  = 8
-	filename string
+	filename, rcPath string
 
 	// Status line
 	statusFg   termbox.Attribute
@@ -74,6 +74,8 @@ var (
 	wordRegexp  = regexp.MustCompile(`\w`)
 	spaceRegexp = regexp.MustCompile(`\s`)
 	formRegexp  = regexp.MustCompile(`^<.+?>`)
+
+	tabStop = 8
 )
 
 // Draw the given string in the given style, starting at the given screen
@@ -444,6 +446,9 @@ func execString(s string) {
 		if match := formRegexp.FindString(s); match != "" {
 			handleKey(match)
 			s = s[len(match):]
+		} else if s[0] == '\\' && len(s) >= 2 {
+			handleKey(s[1:2])
+			s = s[2:]
 		} else {
 			handleKey(s[0:1])
 			s = s[1:]
@@ -539,6 +544,7 @@ func changeLine(d int) {
 
 // Attempt to read the file with the given path into the buffer
 func openFile(path string) {
+	path = expandPath(path)
 	if p, err := ioutil.ReadFile(path); err == nil {
 		mainText.Delete("1.0", "end")
 		mainText.Insert("1.0", string(p))
@@ -621,10 +627,11 @@ func cancel() {
 // Initialize command-line flags and args
 func initFlags() {
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, "Usage: %s [<file>]\n", os.Args[0])
-		//fmt.Fprint(os.Stderr, "\n\nOptions:\n")
-		//flag.PrintDefaults()
+		fmt.Fprintf(os.Stderr, "Usage: %s [<options>] [<file>]", os.Args[0])
+		fmt.Fprint(os.Stderr, "\n\nOptions:\n")
+		flag.PrintDefaults()
 	}
+	flag.StringVar(&rcPath, "rc", "~/.zygoterc", "path to rc file")
 
 	flag.Parse()
 
@@ -795,6 +802,28 @@ func handleEvents() {
 	}
 }
 
+func expandPath(path string) string {
+	if strings.HasPrefix(path, "~") {
+		if u, err := user.Current(); err == nil {
+			path = strings.Replace(path, "~", u.HomeDir, 1)
+		} else {
+			msgError(err.Error())
+		}
+	}
+	return path
+}
+
+func readConfig(path string) {
+	path = expandPath(path)
+	if p, err := ioutil.ReadFile(path); err == nil {
+		for _, line := range strings.Split(string(p), "\n") {
+			execString(line)
+		}
+	} else {
+		msgError(err.Error())
+	}
+}
+
 // Entry point
 func main() {
 	initFlags()
@@ -815,6 +844,7 @@ func main() {
 	promptText.MarkSet(selMark, cursorMark)
 	promptText.MarkSetGravity(selMark, tktext.Left)
 	msgNormal("Zygote, alpha version. Press M-m to view manual.")
+	readConfig(rcPath)
 	if filename != "" {
 		openFile(filename)
 	}
