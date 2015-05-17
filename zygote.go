@@ -29,6 +29,8 @@ const (
 	promptQuitYN
 	promptSave
 	promptSaveYN
+	promptSearchBackward
+	promptSearchForward
 	promptWrite
 	promptWriteWhich
 	promptExecute
@@ -209,6 +211,10 @@ func draw() {
 			s = "Save as: "
 		case promptSaveYN:
 			s = "Overwrite file? (y/n): "
+		case promptSearchBackward:
+			s = "Backward search (C-b repeats last search): "
+		case promptSearchForward:
+			s = "Forward search (C-f repeats last search): "
 		case promptWrite:
 			s = "Type: "
 		case promptWriteWhich:
@@ -412,11 +418,21 @@ func handleKey(s string) bool {
 	case "<Tab>", "<C-i>":
 		typeRune('\t')
 	case "<C-b>":
-		search(false)
+		if focusText == promptText && promptMode == promptSearchBackward {
+			unprompt()
+			search(false)
+		} else {
+			prompt(promptSearchBackward)
+		}
 	case "<C-c>":
 		cancel()
 	case "<C-f>":
-		search(true)
+		if focusText == promptText && promptMode == promptSearchForward {
+			unprompt()
+			search(true)
+		} else {
+			prompt(promptSearchForward)
+		}
 	case "<C-o>":
 		if mainText.EditGetModified() {
 			prompt(promptOpenYN)
@@ -536,6 +552,12 @@ func typeRune(ch rune) bool {
 		case promptSave:
 			filename = promptText.Get("1.0", "end")
 			saveFile(false)
+		case promptSearchBackward:
+			register['S'] = promptText.Get("1.0", "end")
+			search(false)
+		case promptSearchForward:
+			register['S'] = promptText.Get("1.0", "end")
+			search(true)
 		case promptWrite:
 			setRegister(regRune, promptText.Get("1.0", "end"))
 		}
