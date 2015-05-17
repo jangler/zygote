@@ -13,16 +13,21 @@ Commands perform single actions, and have key bindings that use the Ctrl key
 (abbreviated as C-). Some commands prompt for further input. Most of the
 commands and modes that work in the main buffer also work in the prompt buffer.
 
+  C-_  Undo change to buffer
+  C-a  Start of line
   C-b  Backward search
   C-c  Cancel prompt
+  C-e  End of line
   C-f  Forward search
+  C-h  Delete character
   C-o  Open file
   C-p  Put from register
   C-q  Quit
   C-r  Redo change to buffer
   C-s  Save file
-  C-u  Undo change to buffer
-  C-w  Write into register
+  C-t  Type into register
+  C-u  Delete line
+  C-w  Delete word
   C-x  Execute from register
   C-y  Yank into register
   C-z  Suspend process
@@ -46,9 +51,10 @@ Registers are string variables identified by a single UTF-8 character. Some
 registers identified by capital letters have special meaning to Zygote.
 
   C  Column number of cursor
+  D  Last deletion
   F  Filename/path
   L  Line number of cursor
-  S  Search string
+  S  Last search string
   T  Tab width
 
 

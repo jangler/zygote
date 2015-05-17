@@ -56,13 +56,8 @@ var (
 		manualText: 0,
 	}
 
-	register = map[rune]string{
-		'C': "0",
-		'F': filename,
-		'L': "1",
-		'T': fmt.Sprintf("%d", tabStop),
-	}
-	regRune rune
+	register = make(map[rune]string)
+	regRune  rune
 
 	// Event channels
 	eventChan = make(chan termbox.Event)
@@ -215,9 +210,9 @@ func draw() {
 		case promptSaveYN:
 			s = "Overwrite file? (y/n): "
 		case promptWrite:
-			s = "Write: "
+			s = "Type: "
 		case promptWriteWhich:
-			s = "Write into register: "
+			s = "Type into register: "
 		case promptExecute:
 			s = "Execute from register: "
 		case promptYank:
@@ -384,16 +379,16 @@ func handleKey(s string) bool {
 			changeLine(-1)
 			sep, resetCol = true, false
 		}
-	case "<Backspace>", "<C-8>":
+	case "<Backspace>", "<C-8>", "<C-h>":
 		del("-1c")
 	case "<Delete>":
 		del("+1c")
-	case "<End>":
+	case "<End>", "<C-e>":
 		focusText.MarkSet(cursorMark, cursorMark+" lineend")
 		sep = true
 	case "<Enter>", "<C-m>":
 		typeRune('\n')
-	case "<Home>":
+	case "<Home>", "<C-a>":
 		focusText.MarkSet(cursorMark, cursorMark+" linestart")
 		sep = true
 	case "<PgDn>":
@@ -441,10 +436,14 @@ func handleKey(s string) bool {
 		}
 	case "<C-r>":
 		redo()
-	case "<C-u>":
+	case "<C-_>", "<C-/>":
 		undo()
-	case "<C-w>":
+	case "<C-t>":
 		prompt(promptWriteWhich)
+	case "<C-u>":
+		del(" linestart")
+	case "<C-w>":
+		del("-1w")
 	case "<C-x>":
 		prompt(promptExecute)
 	case "<C-y>":
@@ -728,7 +727,7 @@ func toggleSelect() {
 
 // This function is nasty.
 func moveCursor(modifier string) {
-	if modeWord {
+	if modeWord || modifier == "-1w" {
 		pos := focusText.Index(cursorMark)
 		line := focusText.Get(cursorMark+" linestart", cursorMark+" lineend")
 		if modifier == "+1c" {
@@ -756,7 +755,7 @@ func moveCursor(modifier string) {
 				}
 			}
 			focusText.MarkSet(cursorMark, pos.String())
-		} else if modeWord && modifier == "-1c" {
+		} else if modifier == "-1c" || modifier == "-1w" {
 			if pos.Char == 0 {
 				if focusText != promptText {
 					pos.Line--
@@ -796,8 +795,10 @@ func del(modifier string) {
 		moveCursor(modifier)
 	}
 	if focusText.Compare(selMark, cursorMark) < 0 {
+		register['D'] = focusText.Get(selMark, cursorMark)
 		focusText.Delete(selMark, cursorMark)
 	} else {
+		register['D'] = focusText.Get(cursorMark, selMark)
 		focusText.Delete(cursorMark, selMark)
 	}
 }
