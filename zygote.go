@@ -844,12 +844,12 @@ func main() {
 	promptText.MarkSet(selMark, cursorMark)
 	promptText.MarkSetGravity(selMark, tktext.Left)
 	msgNormal("Zygote, alpha version. Press M-m to view manual.")
-	readConfig(rcPath)
 	if filename != "" {
 		openFile(filename)
 	}
 	draw()
 
 	go getEvent()
+	go readConfig(rcPath)
 	handleEvents()
 }
