@@ -57,6 +57,7 @@ var (
 	}
 
 	register = map[rune]string{
+		'C': "0",
 		'F': filename,
 		'L': "1",
 		'T': fmt.Sprintf("%d", tabStop),
@@ -65,7 +66,7 @@ var (
 
 	// Event channels
 	eventChan = make(chan termbox.Event)
-	quitChan  = make(chan bool)
+	quitChan  = make(chan bool, 1)
 
 	// Modes
 	modeManual, modeSelect, modeView, modeWord bool
@@ -270,6 +271,8 @@ func unprompt() {
 func getRegister(ch rune) string {
 	var s string
 	switch ch {
+	case 'C':
+		s = fmt.Sprintf("%d", focusText.Index(cursorMark).Char)
 	case 'F':
 		s = filename
 	case 'L':
@@ -284,6 +287,16 @@ func getRegister(ch rune) string {
 
 func setRegister(ch rune, s string) {
 	switch ch {
+	case 'C':
+		if n, err := strconv.ParseInt(s, 10, 0); err == nil {
+			if n < 0 {
+				n = 0
+			}
+			pos := focusText.Index(cursorMark)
+			focusText.MarkSet(cursorMark, fmt.Sprintf("%d.%d", pos.Line, n))
+		} else {
+			msgError(err.Error())
+		}
 	case 'F':
 		filename = s
 	case 'L':
@@ -292,8 +305,7 @@ func setRegister(ch rune, s string) {
 				n = 0
 			}
 			pos := focusText.Index(cursorMark)
-			focusText.MarkSet(cursorMark,
-				fmt.Sprintf("%d.%d", n, pos.Char))
+			focusText.MarkSet(cursorMark, fmt.Sprintf("%d.%d", n, pos.Char))
 		} else {
 			msgError(err.Error())
 		}
@@ -321,6 +333,29 @@ func getSelText() string {
 		}
 	}
 	return focusText.Get(cursorMark, cursorMark+"+1c")
+}
+
+func search(forward bool) {
+	if s := register['S']; s != "" {
+		if forward {
+			text := focusText.Get(cursorMark+"+1c", "end")
+			if index := strings.Index(text, s); index >= 0 {
+				focusText.MarkSet(cursorMark,
+					fmt.Sprintf("%s+%dc", cursorMark, index+1))
+			} else {
+				msgError("No forward match.")
+			}
+		} else {
+			text := focusText.Get("1.0", cursorMark)
+			if index := strings.LastIndex(text, s); index >= 0 {
+				focusText.MarkSet(cursorMark, fmt.Sprintf("1.0+%dc", index))
+			} else {
+				msgError("No backward match.")
+			}
+		}
+	} else {
+		msgError("No search string.")
+	}
 }
 
 func handleKey(s string) bool {
@@ -381,8 +416,12 @@ func handleKey(s string) bool {
 		typeRune(' ')
 	case "<Tab>", "<C-i>":
 		typeRune('\t')
+	case "<C-b>":
+		search(false)
 	case "<C-c>":
 		cancel()
+	case "<C-f>":
+		search(true)
 	case "<C-o>":
 		if mainText.EditGetModified() {
 			prompt(promptOpenYN)
@@ -844,12 +883,12 @@ func main() {
 	promptText.MarkSet(selMark, cursorMark)
 	promptText.MarkSetGravity(selMark, tktext.Left)
 	msgNormal("Zygote, alpha version. Press M-m to view manual.")
+	readConfig(rcPath)
 	if filename != "" {
 		openFile(filename)
 	}
 	draw()
 
 	go getEvent()
-	go readConfig(rcPath)
 	handleEvents()
 }

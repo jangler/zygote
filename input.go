@@ -62,7 +62,7 @@ var keyMap = map[termbox.Key]string{
 	termbox.KeyCtrlZ:          "<C-z>",
 }
 
-// Converts a key event to a string representation
+// keyString converts a key event to a string representation.
 func keyString(event termbox.Event) string {
 	var s string
 	if event.Key != 0 {
