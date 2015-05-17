@@ -767,7 +767,8 @@ func moveCursor(modifier string) {
 					}
 				} else {
 					for pos.Char < llen &&
-						!wordRegexp.Match([]byte{line[pos.Char]}) {
+						!wordRegexp.Match([]byte{line[pos.Char]}) &&
+						!spaceRegexp.Match([]byte{line[pos.Char]}) {
 						pos.Char++
 					}
 				}
@@ -784,20 +785,21 @@ func moveCursor(modifier string) {
 					pos = focusText.Index(pos.String() + " lineend")
 				}
 			} else {
-				if wordRegexp.Match([]byte{line[pos.Char-1]}) {
+				for pos.Char > 0 &&
+					spaceRegexp.Match([]byte{line[pos.Char-1]}) {
+					pos.Char--
+				}
+				if pos.Char > 0 && wordRegexp.Match([]byte{line[pos.Char-1]}) {
 					for pos.Char > 0 &&
 						wordRegexp.Match([]byte{line[pos.Char-1]}) {
 						pos.Char--
 					}
 				} else {
 					for pos.Char > 0 &&
-						!wordRegexp.Match([]byte{line[pos.Char-1]}) {
+						!wordRegexp.Match([]byte{line[pos.Char-1]}) &&
+						!spaceRegexp.Match([]byte{line[pos.Char-1]}) {
 						pos.Char--
 					}
-				}
-				for pos.Char > 0 &&
-					spaceRegexp.Match([]byte{line[pos.Char-1]}) {
-					pos.Char--
 				}
 			}
 			focusText.MarkSet(cursorMark, pos.String())
